@@ -147,6 +147,14 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 .Elegida { background:#dcfce7; }
 .Descartada { background:#fee2e2; }
 .Fichada_por_otro_equipo { background:#e5e7eb; }
+.round-pill { display:inline-block; min-width:28px; text-align:center; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:bold; background:#e5e7eb; }
+.round-1 { background:#fee2e2; }
+.round-2 { background:#ffedd5; }
+.round-3 { background:#fef3c7; }
+.round-4 { background:#dcfce7; }
+.round-5 { background:#dbeafe; }
+.round-6 { background:#ede9fe; }
+.round-7, .round-8, .round-9, .round-10 { background:#e5e7eb; }
 .row-Objetivo td { background:#fff8e1; }
 .row-Elegida td { background:#ecfdf5; }
 .row-Descartada td { background:#fef2f2; }
@@ -165,14 +173,16 @@ function normalizeText(v){return (v||'').toLowerCase().trim();}
 function filterRows(){
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
+ const rd=document.getElementById('liveRound');
  if(!s||!st) return;
- const text=normalizeText(s.value), status=normalizeText(st.value);
+ const text=normalizeText(s.value), status=normalizeText(st.value), round=normalizeText(rd ? rd.value : '');
  const rows=document.querySelectorAll("tbody tr[data-player-row='1']");
  let visible=0;
  rows.forEach((row)=>{
    const hay=normalizeText(row.dataset.search||'');
    const rs=normalizeText(row.dataset.status||'');
-   const show=(!text||hay.includes(text))&&(!status||rs===status);
+   const rr=normalizeText(row.dataset.round||'');
+   const show=(!text||hay.includes(text))&&(!status||rs===status)&&(!round||rr===round);
    row.style.display=show?'':'none';
    if(show) visible+=1;
  });
@@ -182,15 +192,19 @@ function filterRows(){
 function clearFilters(){
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
+ const rd=document.getElementById('liveRound');
  if(s) s.value='';
  if(st) st.value='';
+ if(rd) rd.value='';
  filterRows();
 }
 document.addEventListener('DOMContentLoaded',()=>{
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
+ const rd=document.getElementById('liveRound');
  if(s) s.addEventListener('input',filterRows);
  if(st) st.addEventListener('change',filterRows);
+ if(rd) rd.addEventListener('change',filterRows);
  filterRows();
 });
 </script>
@@ -401,7 +415,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Objetivo</button></form>",
             ])
-            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
+            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='6' class='muted'>No hay jugadoras.</td></tr>"
         table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('status','Estado jugadora')}</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
@@ -425,7 +439,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
                 ]
             actions_html = "<div class='actions-toolbar'>" + "".join(actions) + "</div>"
-            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{html.escape(str(round_display))}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
+            round_class = f"round-{draft_round}" if draft_round else ""
+            round_html = f"<span class='round-pill {round_class}'>{draft_round}</span>" if draft_round else ""
+            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
         table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
@@ -466,11 +482,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"{admin_box}"
         f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Base de datos</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Objetivos</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a></div>"
         f"{add_box}{wildcard_box}"
-        "<div class='card'><h2>Filtros</h2><div class='grid-3'>"
-        "<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
-        "<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
-        "<div style='display:flex;align-items:end;'><button type='button' class='btn btn-secondary' onclick='clearFilters()'>Limpiar</button></div>"
-        "</div><div class='muted' style='margin-top:10px;'>Mostrando <strong id='visibleCount'>0</strong> jugadoras</div></div>"
+        f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
+        f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
+        f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
+        f"{"<div><label>Ronda</label><select id='liveRound'><option value=''>Todas</option>" + ''.join([f"<option value='{i}'>{i}</option>" for i in range(1,11)]) + "</select></div>" if tab == 'objectives' else "<div><label>Ronda</label><select id='liveRound' disabled><option value=''>No aplica</option></select></div>"}"
+        f"</div><div style='margin-top:12px;'><button type='button' class='btn btn-secondary' onclick='clearFilters()'>Limpiar</button></div><div class='muted' style='margin-top:10px;'>Mostrando <strong id='visibleCount'>0</strong> jugadoras</div></div>"
         f"<div class='card'><h2>{'Base de datos compartida' if tab=='database' else 'Objetivos de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
     )
     return page(content)
