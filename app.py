@@ -1,4 +1,3 @@
-
 import os
 import csv
 import io
@@ -22,15 +21,19 @@ if not DATABASE_URL:
 
 SESSION_COOKIE = "draft_session"
 
+
 def hash_text(value: str) -> str:
     return hashlib.sha256((value + SECRET_KEY).encode("utf-8")).hexdigest()
+
 
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
 
+
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -40,6 +43,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS players (
             id SERIAL PRIMARY KEY,
@@ -50,18 +54,27 @@ def init_db():
             notes TEXT DEFAULT ''
         )
     """)
+
     conn.commit()
 
     cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USER,))
-    if not cur.fetchone():
+    user = cur.fetchone()
+
+    if user:
+        cur.execute(
+            "UPDATE users SET password_hash = %s, is_admin = TRUE WHERE username = %s",
+            (hash_text(ADMIN_PASSWORD), ADMIN_USER)
+        )
+    else:
         cur.execute(
             "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s)",
-            (ADMIN_USER, hash_text(ADMIN_PASSWORD), True),
+            (ADMIN_USER, hash_text(ADMIN_PASSWORD), True)
         )
-        conn.commit()
 
+    conn.commit()
     cur.close()
     conn.close()
+
 
 init_db()
 
@@ -291,6 +304,7 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 """
 
+
 def page(content: str) -> str:
     return f"""<!DOCTYPE html>
 <html>
@@ -306,24 +320,29 @@ def page(content: str) -> str:
 </body>
 </html>"""
 
+
 def get_current_user(request: Request):
     token = request.cookies.get(SESSION_COOKIE, "")
     if not token:
         return None
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT id, username, is_admin FROM users")
     rows = cur.fetchall()
     cur.close()
     conn.close()
+
     for user_id, username, is_admin in rows:
         expected = hash_text(f"{username}:{user_id}")
         if token == expected:
             return {"id": user_id, "username": username, "is_admin": is_admin}
     return None
 
+
 def require_user(request: Request):
     return get_current_user(request)
+
 
 def get_stats():
     conn = get_conn()
@@ -342,11 +361,13 @@ def get_stats():
     conn.close()
     return total, disponible, objetivo, elegida, descartada
 
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, error: str = ""):
     user = get_current_user(request)
     if user:
         return RedirectResponse("/", status_code=303)
+
     msg = '<div class="alert">Usuario o contraseña incorrectos.</div>' if error else ""
     content = f"""
     <div class="login-wrap">
@@ -371,6 +392,7 @@ def login_page(request: Request, error: str = ""):
     </div>
     """
     return page(content)
+
 
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
@@ -401,11 +423,13 @@ def login(username: str = Form(...), password: str = Form(...)):
     )
     return response
 
+
 @app.get("/logout")
 def logout():
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
+
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, sort: str = "id", order: str = "desc"):
@@ -622,8 +646,14 @@ def home(request: Request, sort: str = "id", order: str = "desc"):
     """
     return page(content)
 
+
 @app.post("/users/create")
-def create_user(request: Request, username: str = Form(...), password: str = Form(...), is_admin: str = Form("0")):
+def create_user(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    is_admin: str = Form("0")
+):
     user = require_user(request)
     if not user or not user["is_admin"]:
         return RedirectResponse("/login", status_code=303)
@@ -641,7 +671,9 @@ def create_user(request: Request, username: str = Form(...), password: str = For
     finally:
         cur.close()
         conn.close()
+
     return RedirectResponse("/", status_code=303)
+
 
 @app.get("/edit/{player_id}", response_class=HTMLResponse)
 def edit_page(player_id: int, request: Request):
@@ -695,8 +727,16 @@ def edit_page(player_id: int, request: Request):
     """
     return page(content)
 
+
 @app.post("/add")
-def add(request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
+def add(
+    request: Request,
+    name: str = Form(...),
+    team: str = Form(""),
+    position: str = Form(""),
+    status: str = Form("Disponible"),
+    notes: str = Form("")
+):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -712,8 +752,17 @@ def add(request: Request, name: str = Form(...), team: str = Form(""), position:
     conn.close()
     return RedirectResponse("/", status_code=303)
 
+
 @app.post("/update/{player_id}")
-def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
+def update_player(
+    player_id: int,
+    request: Request,
+    name: str = Form(...),
+    team: str = Form(""),
+    position: str = Form(""),
+    status: str = Form("Disponible"),
+    notes: str = Form("")
+):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -729,6 +778,7 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
     conn.close()
     return RedirectResponse("/", status_code=303)
 
+
 @app.post("/status/{player_id}")
 def change_status(player_id: int, request: Request, status: str = Form(...)):
     user = require_user(request)
@@ -742,6 +792,7 @@ def change_status(player_id: int, request: Request, status: str = Form(...)):
     cur.close()
     conn.close()
     return RedirectResponse("/", status_code=303)
+
 
 @app.post("/delete/{player_id}")
 def delete_player(player_id: int, request: Request):
@@ -757,6 +808,7 @@ def delete_player(player_id: int, request: Request):
     conn.close()
     return RedirectResponse("/", status_code=303)
 
+
 @app.post("/import")
 def import_csv(request: Request, file: UploadFile = File(...)):
     user = require_user(request)
@@ -768,6 +820,7 @@ def import_csv(request: Request, file: UploadFile = File(...)):
 
     conn = get_conn()
     cur = conn.cursor()
+
     for row in reader:
         name = (row.get("name") or row.get("nombre") or "").strip()
         team = (row.get("team") or row.get("equipo") or "").strip()
@@ -784,6 +837,7 @@ def import_csv(request: Request, file: UploadFile = File(...)):
     cur.close()
     conn.close()
     return RedirectResponse("/", status_code=303)
+
 
 @app.get("/export")
 def export_excel(request: Request):
