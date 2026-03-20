@@ -387,7 +387,9 @@ def next_order(current_sort: str, current_order: str, field: str) -> str:
     return "asc"
 
 @app.get("/", response_class=HTMLResponse)
-def home(sort: str = "id", order: str = "desc"):
+def home():
+    sort = "id"
+    order = "desc"
     conn = get_conn()
     c = conn.cursor()
 
