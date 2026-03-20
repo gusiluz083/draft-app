@@ -279,11 +279,11 @@ def login_page(request: Request, error: str = ""):
         return RedirectResponse("/select-team", status_code=303)
     msg = '<div class="alert">Usuario o contraseña incorrectos.</div>' if error else ''
     return page(
-        f"<div class='login-wrap'><div class='card'><h1>Entrar</h1><div class='muted'>Acceso privado para tu equipo.</div>{msg}"
+        f"<div class='login-wrap'><div class='card'><h1>Draft Queens League 2026</h1><div class='muted'>Acceso privado para tu equipo.</div>{msg}"
         "<form action='/login' method='post'>"
         "<div style='margin:12px 0;'><label>Usuario</label><input name='username' required></div>"
         "<div style='margin:12px 0;'><label>Contraseña</label><input type='password' name='password' required></div>"
-        "<button type='submit'>Entrar</button></form></div></div>"
+        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación creada por Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
     )
 
 
@@ -457,7 +457,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     if tab == "database":
         add_box = (
             "<div class='grid-2'>"
-            "<div class='card'><h2>Base de datos compartida</h2>"
+            "<div class='card'><h2>Jugadoras</h2>"
             "<form action='/add' method='post'>"
             "<div class='grid'>"
             "<div><label>Nombre</label><input name='name' required></div>"
@@ -481,16 +481,16 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
         f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
-        f"<div class='stats'><div class='stat'><div class='muted'>Total base compartida</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
+        f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
-        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Base de datos</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Objetivos</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a></div>"
+        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras seleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a></div>"
         f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
         f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
         f"{"<div><label>Ronda</label><select id='liveRound'><option value=''>Todas</option>" + ''.join([f"<option value='{i}'>{i}</option>" for i in range(1,11)]) + "</select></div>" if tab == 'objectives' else "<div><label>Ronda</label><select id='liveRound' disabled><option value=''>No aplica</option></select></div>"}"
         f"</div><div style='margin-top:12px;'><button type='button' class='btn btn-secondary' onclick='clearFilters()'>Limpiar</button></div><div class='muted' style='margin-top:10px;'>Mostrando <strong id='visibleCount'>0</strong> jugadoras</div></div>"
-        f"<div class='card'><h2>{'Base de datos compartida' if tab=='database' else 'Objetivos de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
+        f"<div class='card'><h2>{'Jugadoras' if tab=='database' else 'Jugadoras seleccionadas de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
     )
     return page(content)
 
