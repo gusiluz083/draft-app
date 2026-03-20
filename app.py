@@ -427,6 +427,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Objetivo</button></form>",
+                f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
@@ -763,6 +764,23 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
     cur.close()
     conn.close()
     return RedirectResponse("/", status_code=303)
+
+
+@app.post("/delete-player/{player_id}")
+def delete_player(player_id: int, request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM players WHERE id=%s", (player_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/?tab=database", status_code=303)
 
 
 @app.post("/import")
