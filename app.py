@@ -3,9 +3,9 @@ import os
 import csv
 import io
 import html
-from urllib.parse import urlparse
+import hashlib
 
-from fastapi import FastAPI, Form, UploadFile, File
+from fastapi import FastAPI, Form, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from openpyxl import Workbook
 import psycopg2
@@ -13,9 +13,17 @@ import psycopg2
 app = FastAPI()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+SECRET_KEY = os.getenv("SECRET_KEY", "cambia-esto-en-render")
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 if not DATABASE_URL:
     raise RuntimeError("Falta la variable de entorno DATABASE_URL")
+
+SESSION_COOKIE = "draft_session"
+
+def hash_text(value: str) -> str:
+    return hashlib.sha256((value + SECRET_KEY).encode("utf-8")).hexdigest()
 
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
@@ -23,8 +31,16 @@ def get_conn():
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        '''
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_admin BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS players (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
@@ -33,9 +49,17 @@ def init_db():
             status TEXT DEFAULT 'Disponible',
             notes TEXT DEFAULT ''
         )
-        '''
-    )
+    """)
     conn.commit()
+
+    cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USER,))
+    if not cur.fetchone():
+        cur.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s)",
+            (ADMIN_USER, hash_text(ADMIN_PASSWORD), True),
+        )
+        conn.commit()
+
     cur.close()
     conn.close()
 
@@ -60,6 +84,7 @@ CSS = """
         margin-bottom: 20px;
         border: 1px solid #e5e7eb;
     }
+    .login-wrap { max-width: 420px; margin: 80px auto; }
     h1, h2, h3 { margin-top: 0; }
     h1 { font-size: 34px; margin-bottom: 6px; }
     .grid {
@@ -188,11 +213,7 @@ CSS = """
         padding: 16px;
         box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
     }
-    .stat-number {
-        font-size: 28px;
-        font-weight: bold;
-        margin-top: 4px;
-    }
+    .stat-number { font-size: 28px; font-weight: bold; margin-top: 4px; }
     .notes-cell {
         max-width: 220px;
         min-width: 140px;
@@ -208,17 +229,17 @@ CSS = """
         gap: 12px;
         align-items: end;
     }
-    .result-info {
-        margin-top: 12px;
-        font-size: 14px;
-        color: #475569;
-    }
-    .empty-state {
-        text-align: center;
-        color: #64748b;
-        padding: 24px 0;
-    }
+    .result-info { margin-top: 12px; font-size: 14px; color: #475569; }
+    .empty-state { text-align: center; color: #64748b; padding: 24px 0; }
     .sticky-filters { position: sticky; top: 12px; z-index: 5; }
+    .alert {
+        background: #fef2f2;
+        color: #991b1b;
+        border: 1px solid #fecaca;
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-bottom: 12px;
+    }
     @media (max-width: 900px) {
         .grid, .stats, .grid-2, .filter-bar { grid-template-columns: 1fr; }
         .sticky-filters { position: static; }
@@ -232,8 +253,11 @@ function normalizeText(value) {
     return (value || "").toLowerCase().trim();
 }
 function filterRows() {
-    const text = normalizeText(document.getElementById("liveSearch").value);
-    const status = normalizeText(document.getElementById("liveStatus").value);
+    const searchEl = document.getElementById("liveSearch");
+    const statusEl = document.getElementById("liveStatus");
+    if (!searchEl || !statusEl) return;
+    const text = normalizeText(searchEl.value);
+    const status = normalizeText(statusEl.value);
     const rows = document.querySelectorAll("tbody tr[data-player-row='1']");
     let visible = 0;
     rows.forEach((row) => {
@@ -245,13 +269,16 @@ function filterRows() {
         row.style.display = show ? "" : "none";
         if (show) visible += 1;
     });
-    document.getElementById("visibleCount").textContent = visible;
+    const countEl = document.getElementById("visibleCount");
+    if (countEl) countEl.textContent = visible;
     const empty = document.getElementById("emptyLive");
     if (empty) empty.style.display = visible === 0 ? "" : "none";
 }
 function clearFilters() {
-    document.getElementById("liveSearch").value = "";
-    document.getElementById("liveStatus").value = "";
+    const s = document.getElementById("liveSearch");
+    const st = document.getElementById("liveStatus");
+    if (s) s.value = "";
+    if (st) st.value = "";
     filterRows();
 }
 document.addEventListener("DOMContentLoaded", function () {
@@ -279,6 +306,25 @@ def page(content: str) -> str:
 </body>
 </html>"""
 
+def get_current_user(request: Request):
+    token = request.cookies.get(SESSION_COOKIE, "")
+    if not token:
+        return None
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, is_admin FROM users")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    for user_id, username, is_admin in rows:
+        expected = hash_text(f"{username}:{user_id}")
+        if token == expected:
+            return {"id": user_id, "username": username, "is_admin": is_admin}
+    return None
+
+def require_user(request: Request):
+    return get_current_user(request)
+
 def get_stats():
     conn = get_conn()
     cur = conn.cursor()
@@ -296,8 +342,77 @@ def get_stats():
     conn.close()
     return total, disponible, objetivo, elegida, descartada
 
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, error: str = ""):
+    user = get_current_user(request)
+    if user:
+        return RedirectResponse("/", status_code=303)
+    msg = '<div class="alert">Usuario o contraseña incorrectos.</div>' if error else ""
+    content = f"""
+    <div class="login-wrap">
+        <div class="card">
+            <h1>Entrar</h1>
+            <div class="muted">Acceso privado para tu equipo.</div>
+            <div style="margin-top:16px;">
+                {msg}
+                <form action="/login" method="post">
+                    <div style="margin-bottom:12px;">
+                        <label>Usuario</label>
+                        <input name="username" required>
+                    </div>
+                    <div style="margin-bottom:12px;">
+                        <label>Contraseña</label>
+                        <input type="password" name="password" required>
+                    </div>
+                    <button type="submit">Entrar</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    """
+    return page(content)
+
+@app.post("/login")
+def login(username: str = Form(...), password: str = Form(...)):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, username, password_hash, is_admin FROM users WHERE username = %s",
+        (username.strip(),),
+    )
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not user:
+        return RedirectResponse("/login?error=1", status_code=303)
+
+    user_id, db_username, password_hash, is_admin = user
+    if password_hash != hash_text(password):
+        return RedirectResponse("/login?error=1", status_code=303)
+
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=hash_text(f"{db_username}:{user_id}"),
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7,
+    )
+    return response
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
+
 @app.get("/", response_class=HTMLResponse)
-def home(sort: str = "id", order: str = "desc"):
+def home(request: Request, sort: str = "id", order: str = "desc"):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     allowed = ["id", "name", "team", "position", "status"]
     if sort not in allowed:
         sort = "id"
@@ -317,7 +432,7 @@ def home(sort: str = "id", order: str = "desc"):
     rows = ""
     for pid, name, team, position, st, notes in players:
         search_blob = " ".join([name or "", team or "", position or "", st or "", notes or ""])
-        rows += f'''
+        rows += f"""
         <tr class="row-{html.escape(st)} clickable-row" onclick="window.location='/edit/{pid}'"
             data-player-row="1"
             data-status="{html.escape(st)}"
@@ -352,7 +467,7 @@ def home(sort: str = "id", order: str = "desc"):
                 </div>
             </td>
         </tr>
-        '''
+        """
 
     if not rows:
         rows = '<tr><td colspan="6" class="empty-state">No hay jugadoras todavía.</td></tr>'
@@ -364,14 +479,46 @@ def home(sort: str = "id", order: str = "desc"):
             arrow = " ↑" if order == "asc" else " ↓"
         return f'<a href="/?sort={field}&order={new_order}">{label}{arrow}</a>'
 
-    content = f'''
+    admin_box = ""
+    if user["is_admin"]:
+        admin_box = """
+        <div class="card">
+            <h2>Crear usuario</h2>
+            <div class="muted">Solo visible para admin.</div>
+            <form action="/users/create" method="post" style="margin-top:12px;">
+                <div class="grid">
+                    <div>
+                        <label>Usuario</label>
+                        <input name="username" required>
+                    </div>
+                    <div>
+                        <label>Contraseña</label>
+                        <input type="password" name="password" required>
+                    </div>
+                    <div>
+                        <label>Rol</label>
+                        <select name="is_admin">
+                            <option value="0">Usuario</option>
+                            <option value="1">Admin</option>
+                        </select>
+                    </div>
+                    <div>
+                        <button type="submit">Crear usuario</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        """
+
+    content = f"""
     <div class="topbar">
         <div>
             <h1>Draft Web</h1>
-            <div class="muted">Ahora guardando datos en PostgreSQL.</div>
+            <div class="muted">Usuario: <strong>{html.escape(user["username"])}</strong></div>
         </div>
         <div class="actions-toolbar">
             <a class="btn" href="/export">Exportar Excel</a>
+            <a class="btn btn-secondary" href="/logout">Salir</a>
         </div>
     </div>
 
@@ -381,6 +528,8 @@ def home(sort: str = "id", order: str = "desc"):
         <div class="stat"><div class="muted">Objetivo</div><div class="stat-number">{objetivo}</div></div>
         <div class="stat"><div class="muted">Elegidas / Descartadas</div><div class="stat-number">{elegida} / {descartada}</div></div>
     </div>
+
+    {admin_box}
 
     <div class="grid-2">
         <div class="card">
@@ -470,16 +619,41 @@ def home(sort: str = "id", order: str = "desc"):
             </table>
         </div>
     </div>
-    '''
+    """
     return page(content)
 
+@app.post("/users/create")
+def create_user(request: Request, username: str = Form(...), password: str = Form(...), is_admin: str = Form("0")):
+    user = require_user(request)
+    if not user or not user["is_admin"]:
+        return RedirectResponse("/login", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s)",
+            (username.strip(), hash_text(password), is_admin == "1"),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/", status_code=303)
+
 @app.get("/edit/{player_id}", response_class=HTMLResponse)
-def edit_page(player_id: int):
+def edit_page(player_id: int, request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         "SELECT id, name, team, position, status, COALESCE(notes, '') FROM players WHERE id = %s",
-        (player_id,)
+        (player_id,),
     )
     player = cur.fetchone()
     cur.close()
@@ -490,7 +664,7 @@ def edit_page(player_id: int):
 
     pid, name, team, position, status, notes = player
 
-    content = f'''
+    content = f"""
     <div class="card">
         <h1>Editar jugadora</h1>
         <form action="/update/{pid}" method="post">
@@ -518,22 +692,20 @@ def edit_page(player_id: int):
             </div>
         </form>
     </div>
-    '''
+    """
     return page(content)
 
 @app.post("/add")
-def add(
-    name: str = Form(...),
-    team: str = Form(""),
-    position: str = Form(""),
-    status: str = Form("Disponible"),
-    notes: str = Form("")
-):
+def add(request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO players (name, team, position, status, notes) VALUES (%s, %s, %s, %s, %s)",
-        (name.strip(), team.strip(), position.strip(), status, notes.strip())
+        (name.strip(), team.strip(), position.strip(), status, notes.strip()),
     )
     conn.commit()
     cur.close()
@@ -541,19 +713,16 @@ def add(
     return RedirectResponse("/", status_code=303)
 
 @app.post("/update/{player_id}")
-def update_player(
-    player_id: int,
-    name: str = Form(...),
-    team: str = Form(""),
-    position: str = Form(""),
-    status: str = Form("Disponible"),
-    notes: str = Form("")
-):
+def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         "UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s WHERE id=%s",
-        (name.strip(), team.strip(), position.strip(), status, notes.strip(), player_id)
+        (name.strip(), team.strip(), position.strip(), status, notes.strip(), player_id),
     )
     conn.commit()
     cur.close()
@@ -561,7 +730,11 @@ def update_player(
     return RedirectResponse("/", status_code=303)
 
 @app.post("/status/{player_id}")
-def change_status(player_id: int, status: str = Form(...)):
+def change_status(player_id: int, request: Request, status: str = Form(...)):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE players SET status = %s WHERE id = %s", (status, player_id))
@@ -571,7 +744,11 @@ def change_status(player_id: int, status: str = Form(...)):
     return RedirectResponse("/", status_code=303)
 
 @app.post("/delete/{player_id}")
-def delete_player(player_id: int):
+def delete_player(player_id: int, request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("DELETE FROM players WHERE id = %s", (player_id,))
@@ -581,13 +758,16 @@ def delete_player(player_id: int):
     return RedirectResponse("/", status_code=303)
 
 @app.post("/import")
-def import_csv(file: UploadFile = File(...)):
+def import_csv(request: Request, file: UploadFile = File(...)):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     content = file.file.read().decode("utf-8-sig").splitlines()
     reader = csv.DictReader(content)
 
     conn = get_conn()
     cur = conn.cursor()
-
     for row in reader:
         name = (row.get("name") or row.get("nombre") or "").strip()
         team = (row.get("team") or row.get("equipo") or "").strip()
@@ -597,7 +777,7 @@ def import_csv(file: UploadFile = File(...)):
         if name:
             cur.execute(
                 "INSERT INTO players (name, team, position, status, notes) VALUES (%s, %s, %s, %s, %s)",
-                (name, team, position, status, notes)
+                (name, team, position, status, notes),
             )
 
     conn.commit()
@@ -606,12 +786,14 @@ def import_csv(file: UploadFile = File(...)):
     return RedirectResponse("/", status_code=303)
 
 @app.get("/export")
-def export_excel():
+def export_excel(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        "SELECT name, team, position, status, COALESCE(notes, '') FROM players ORDER BY id DESC"
-    )
+    cur.execute("SELECT name, team, position, status, COALESCE(notes, '') FROM players ORDER BY id DESC")
     players = cur.fetchall()
     cur.close()
     conn.close()
@@ -630,5 +812,5 @@ def export_excel():
     return StreamingResponse(
         stream,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=jugadoras.xlsx"}
+        headers={"Content-Disposition": "attachment; filename=jugadoras.xlsx"},
     )
