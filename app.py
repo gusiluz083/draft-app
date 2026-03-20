@@ -273,6 +273,16 @@ def get_wildcard(board_team: str):
     return row[0] if row else ""
 
 
+def list_users_data():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, is_admin, created_at FROM users ORDER BY username ASC")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, error: str = ""):
     if get_current_user(request):
@@ -451,7 +461,58 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     admin_box = ""
     if user["is_admin"]:
-        admin_box = "<div class='card'><h2>Crear usuario</h2><form action='/users/create' method='post'><div class='grid'><div><label>Usuario</label><input name='username' required></div><div><label>Contraseña</label><input type='password' name='password' required></div><div><label>Rol</label><select name='is_admin'><option value='0'>Usuario</option><option value='1'>Admin</option></select></div><div><button type='submit'>Crear usuario</button></div></div></form></div>"
+        user_rows = ""
+        for uid, uname, is_admin_flag, created_at in list_users_data():
+            created_text = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
+            role_text = "Admin" if is_admin_flag else "Usuario"
+            role_options = (
+                f"<option value='0' {'selected' if not is_admin_flag else ''}>Usuario</option>"
+                f"<option value='1' {'selected' if is_admin_flag else ''}>Admin</option>"
+            )
+            delete_button = (
+                f"<form class='inline-form' action='/users/delete/{uid}' method='post' onsubmit=\"return confirm('¿Borrar usuario?')\">"
+                f"<button class='btn btn-danger action-btn' type='submit'>Borrar</button></form>"
+            )
+            if uname == user["username"]:
+                delete_button = "<span class='muted'>No borrar</span>"
+            user_rows += (
+                f"<tr>"
+                f"<td>{html.escape(uname)}</td>"
+                f"<td>{role_text}</td>"
+                f"<td>{created_text}</td>"
+                f"<td>"
+                f"<form class='inline-form actions-toolbar' action='/users/role/{uid}' method='post'>"
+                f"<select name='is_admin' style='width:110px;padding:6px 8px;'>{role_options}</select>"
+                f"<button class='btn btn-secondary action-btn' type='submit'>Guardar rol</button>"
+                f"</form>"
+                f"</td>"
+                f"<td>"
+                f"<form class='inline-form actions-toolbar' action='/users/password/{uid}' method='post'>"
+                f"<input type='password' name='password' placeholder='Nueva contraseña' style='width:170px;padding:6px 8px;'>"
+                f"<button class='btn btn-dark action-btn' type='submit'>Cambiar</button>"
+                f"</form>"
+                f"</td>"
+                f"<td>{delete_button}</td>"
+                f"</tr>"
+            )
+
+        if not user_rows:
+            user_rows = "<tr><td colspan='6' class='muted'>No hay usuarios.</td></tr>"
+
+        admin_box = (
+            "<div class='card'><h2>Administración de usuarios</h2>"
+            "<div class='grid' style='margin-bottom:16px;'>"
+            "<form action='/users/create' method='post' style='display:contents;'>"
+            "<div><label>Usuario</label><input name='username' required></div>"
+            "<div><label>Contraseña</label><input type='password' name='password' required></div>"
+            "<div><label>Rol</label><select name='is_admin'><option value='0'>Usuario</option><option value='1'>Admin</option></select></div>"
+            "<div><button type='submit'>Crear usuario</button></div>"
+            "</form></div>"
+            "<div class='table-wrap'><table>"
+            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
+            f"<tbody>{user_rows}</tbody></table></div>"
+            "</div>"
+        )
 
     add_box = ""
     if tab == "database":
@@ -504,6 +565,71 @@ def create_user(request: Request, username: str = Form(...), password: str = For
     cur = conn.cursor()
     try:
         cur.execute("INSERT INTO users (username, password_hash, is_admin) VALUES (%s,%s,%s)", (username.strip(), hash_text(password), is_admin == "1"))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/", status_code=303)
+
+
+
+
+@app.post("/users/role/{user_id}")
+def update_user_role(user_id: int, request: Request, is_admin: str = Form("0")):
+    user = require_user(request)
+    if not user or not user["is_admin"]:
+        return RedirectResponse("/login", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET is_admin=%s WHERE id=%s", (is_admin == "1", user_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/users/password/{user_id}")
+def update_user_password(user_id: int, request: Request, password: str = Form("")):
+    user = require_user(request)
+    if not user or not user["is_admin"]:
+        return RedirectResponse("/login", status_code=303)
+
+    if not password.strip():
+        return RedirectResponse("/", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (hash_text(password.strip()), user_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/users/delete/{user_id}")
+def delete_user(user_id: int, request: Request):
+    user = require_user(request)
+    if not user or not user["is_admin"]:
+        return RedirectResponse("/login", status_code=303)
+
+    if user_id == user["id"]:
+        return RedirectResponse("/", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM users WHERE id=%s", (user_id,))
         conn.commit()
     except Exception:
         conn.rollback()
