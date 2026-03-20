@@ -64,11 +64,11 @@ def init_db():
             team TEXT,
             position TEXT,
             status TEXT DEFAULT 'Disponible',
-            notes TEXT DEFAULT '',
-            board_team TEXT DEFAULT 'PILARES',
-            draft_round INTEGER
+            notes TEXT DEFAULT ''
         )
     """)
+    cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS board_team TEXT DEFAULT 'PILARES'")
+    cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS draft_round INTEGER")
     conn.commit()
     cur.close()
     conn.close()
