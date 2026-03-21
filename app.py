@@ -31,7 +31,15 @@ def hash_text(value: str) -> str:
 
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+    return conn
 
 
 def ensure_admin():
