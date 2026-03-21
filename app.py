@@ -346,6 +346,25 @@ def get_draftday_state(board_team: str):
 
 
 def get_blocked_players(board_team: str, current_round: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        '''
+        SELECT p.name, p.team, p.position, COALESCE(d.draft_round, 0), COALESCE(d.round_order, 0)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s
+          AND d.status='Fichada por otro equipo'
+          AND COALESCE(d.draft_round, 0) = %s
+        ORDER BY COALESCE(d.round_order, 999), p.name
+        ''',
+        (board_team, current_round),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
 
 def risk_level(picks_remaining, round_order):
     if picks_remaining is None or round_order is None:
