@@ -283,6 +283,31 @@ def list_users_data():
     return rows
 
 
+def create_login_log(username: str, success: bool, selected_team: str = None, event_type: str = "login"):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO login_logs (username, success, selected_team, event_type) VALUES (%s, %s, %s, %s)",
+        (username, success, selected_team, event_type),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def list_login_logs(limit: int = 100):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT username, success, COALESCE(selected_team, ''), event_type, created_at FROM login_logs ORDER BY created_at DESC LIMIT %s",
+        (limit,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, error: str = ""):
     if get_current_user(request):
@@ -311,6 +336,7 @@ def login(username: str = Form(...), password: str = Form(...)):
         conn.close()
         if row:
             user_id, db_username = row
+            create_login_log(db_username, True, None, "login")
             r = RedirectResponse("/select-team", status_code=303)
             r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
             return r
@@ -322,11 +348,14 @@ def login(username: str = Form(...), password: str = Form(...)):
     cur.close()
     conn.close()
     if not row:
+        create_login_log(username or "desconocido", False, None, "login")
         return RedirectResponse("/login?error=1", status_code=303)
     user_id, db_username, password_hash = row
     if password_hash != hash_text(password):
+        create_login_log(db_username, False, None, "login")
         return RedirectResponse("/login?error=1", status_code=303)
 
+    create_login_log(db_username, True, None, "login")
     r = RedirectResponse("/select-team", status_code=303)
     r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
     return r
@@ -356,10 +385,12 @@ def select_team_page(request: Request):
 
 @app.post("/select-team")
 def select_team(request: Request, team: str = Form(...)):
-    if not require_user(request):
+    user = require_user(request)
+    if not user:
         return RedirectResponse("/login", status_code=303)
     if team not in TEAMS:
         return RedirectResponse("/select-team", status_code=303)
+    create_login_log(user["username"], True, team, "team_select")
     r = RedirectResponse("/", status_code=303)
     r.set_cookie(TEAM_COOKIE, team, httponly=True, samesite="lax", max_age=604800)
     return r
@@ -427,7 +458,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Objetivo</button></form>",
-                f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
@@ -500,6 +530,24 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not user_rows:
             user_rows = "<tr><td colspan='6' class='muted'>No hay usuarios.</td></tr>"
 
+        log_rows = ""
+        for log_username, log_success, log_team, log_event_type, log_created_at in list_login_logs(100):
+            created_text = log_created_at.strftime("%Y-%m-%d %H:%M") if log_created_at else ""
+            success_text = "Correcto" if log_success else "Fallido"
+            event_text = "Login" if log_event_type == "login" else "Selección de equipo"
+            team_text = log_team or "-"
+            log_rows += (
+                f"<tr>"
+                f"<td>{html.escape(log_username)}</td>"
+                f"<td>{event_text}</td>"
+                f"<td>{success_text}</td>"
+                f"<td>{html.escape(team_text)}</td>"
+                f"<td>{created_text}</td>"
+                f"</tr>"
+            )
+        if not log_rows:
+            log_rows = "<tr><td colspan='5' class='muted'>No hay accesos registrados.</td></tr>"
+
         admin_box = (
             "<div class='card'><h2>Administración de usuarios</h2>"
             "<div class='grid' style='margin-bottom:16px;'>"
@@ -513,6 +561,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
             f"<tbody>{user_rows}</tbody></table></div>"
             "</div>"
+            "<div class='card'><h2>Historial de accesos</h2>"
+            "<div class='table-wrap'><table>"
+            "<thead><tr><th>Usuario</th><th>Evento</th><th>Resultado</th><th>Equipo</th><th>Fecha</th></tr></thead>"
+            f"<tbody>{log_rows}</tbody></table></div>"
+            "</div>"
         )
 
     add_box = ""
@@ -524,7 +577,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div class='grid'>"
             "<div><label>Nombre</label><input name='name' required></div>"
             "<div><label>Equipo actual</label><input name='team'></div>"
-            "<div><label>Posición</label><select name='position'><option value='Portera'>Portera</option><option value='Defensa'>Defensa</option><option value='Medio'>Medio</option><option value='Delantera'>Delantera</option></select></div>"
+            "<div><label>Posición</label><input name='position'></div>"
             "<div><label>Estado jugadora</label><select name='status'>"
             "<option value='Disponible'>Disponible</option>"
             "<option value='Lesionada'>Lesionada</option>"
@@ -745,12 +798,7 @@ def edit_page(player_id: int, request: Request):
         f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post'>"
         f"<div class='grid'><div><label>Nombre</label><input name='name' value='{html.escape(name or '')}' required></div>"
         f"<div><label>Equipo actual</label><input name='team' value='{html.escape(team or '')}'></div>"
-        f"<div><label>Posición</label><select name='position'>"
-        f"<option value='Portera' {'selected' if position == 'Portera' else ''}>Portera</option>"
-        f"<option value='Defensa' {'selected' if position == 'Defensa' else ''}>Defensa</option>"
-        f"<option value='Medio' {'selected' if position == 'Medio' else ''}>Medio</option>"
-        f"<option value='Delantera' {'selected' if position == 'Delantera' else ''}>Delantera</option>"
-        f"</select></div>"
+        f"<div><label>Posición</label><input name='position' value='{html.escape(position or '')}'></div>"
         f"<div><label>Estado jugadora</label><select name='status'>{status_options}</select></div></div>"
         f"<div style='margin-top:12px;'><label>Notas</label><textarea name='notes'>{html.escape(notes or '')}</textarea></div>"
         f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar cambios</button><a class='btn btn-secondary' href='/'>Cancelar</a></div>"
@@ -769,23 +817,6 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
     cur.close()
     conn.close()
     return RedirectResponse("/", status_code=303)
-
-
-@app.post("/delete-player/{player_id}")
-def delete_player(player_id: int, request: Request):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM players WHERE id=%s", (player_id,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
-    return RedirectResponse("/?tab=database", status_code=303)
 
 
 @app.post("/import")
