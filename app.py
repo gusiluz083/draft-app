@@ -623,15 +623,15 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
                     f"<div class='actions-toolbar'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
-                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Elegida'><input type='hidden' name='source_tab' value='draftday'><button class='btn-success action-btn' type='submit'>Elegida</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Elegida'><button class='btn-success action-btn' type='submit'>Elegida</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
-                    f"<form class='inline-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
+                    f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
                 ]
             else:
                 actions += [
-                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Descartada'><input type='hidden' name='source_tab' value='draftday'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
-                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><input type='hidden' name='source_tab' value='draftday'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
                 ]
             actions_html = "<div class='actions-toolbar'>" + "".join(actions) + "</div>"
             round_class = f"round-{draft_round}" if draft_round else ""
