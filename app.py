@@ -623,15 +623,15 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
                     f"<div class='actions-toolbar'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Elegida'><button class='btn-success action-btn' type='submit'>Elegida</button></form>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
-                    f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Elegida'><input type='hidden' name='source_tab' value='draftday'><button class='btn-success action-btn' type='submit'>Elegida</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Descartada'><input type='hidden' name='source_tab' value='draftday'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><input type='hidden' name='source_tab' value='draftday'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
+                    f"<form class='inline-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
                 ]
             else:
                 actions += [
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Descartada'><input type='hidden' name='source_tab' value='draftday'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><input type='hidden' name='source_tab' value='draftday'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
                 ]
             actions_html = "<div class='actions-toolbar'>" + "".join(actions) + "</div>"
             round_class = f"round-{draft_round}" if draft_round else ""
@@ -685,10 +685,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
             actions_html = (
                 f"<div class='actions-toolbar'>"
-                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Elegida'><button class='btn-success action-btn' type='submit'>Elegida</button></form>"
-                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
-                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>"
-                f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Elegida'><input type='hidden' name='source_tab' value='draftday'><button class='btn-success action-btn' type='submit'>Elegida</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><input type='hidden' name='source_tab' value='draftday'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Descartada'><input type='hidden' name='source_tab' value='draftday'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>"
+                f"<form class='inline-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
                 f"</div>"
             )
             rows += f"<tr><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td>{order_badge}</td><td>{html.escape(notes or '')}</td><td>{enhanced_risk_level(picks_remaining, round_order, position, position_pressure)}</td><td>{actions_html}</td></tr>"
@@ -1265,6 +1265,10 @@ def remove_objective(player_id: int, request: Request):
         cur.close()
         conn.close()
 
+    source_tab = request.query_params.get("source_tab", "")
+    current_round = request.query_params.get("current_round", "")
+    if source_tab == "draftday":
+        return RedirectResponse("/?tab=draftday" + (f"&current_round={current_round}" if current_round else ""), status_code=303)
     return RedirectResponse("/?tab=objectives", status_code=303)
 
 
