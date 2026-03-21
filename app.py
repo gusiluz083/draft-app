@@ -400,11 +400,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         wanted = "Objetivo" if tab == "objectives" else "Elegida"
         sort_expr = "d.status" if sort == "decision_status" else ("d.draft_round" if sort == "draft_round" else "p." + sort)
         sql = f"""
-            SELECT p.id, p.name, p.team, p.position, p.status, COALESCE(p.notes,''), d.status, d.draft_round
+            SELECT p.id, p.name, p.team, p.position, p.status, COALESCE(p.notes,''), d.status, d.draft_round, d.round_order
             FROM team_player_decisions d
             JOIN players p ON p.id = d.player_id
             WHERE d.board_team = %s AND d.status = %s
-            ORDER BY {sort_expr} {order_sql}
+            ORDER BY {sort_expr} {order_sql}, COALESCE(d.round_order, 999) ASC, p.name ASC
         """
         cur.execute(sql, (board_team, wanted))
         players = cur.fetchall()
