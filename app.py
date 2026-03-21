@@ -281,6 +281,55 @@ def get_wildcard(board_team: str):
     return row[0] if row else ""
 
 
+def is_new_team(board_team: str) -> bool:
+    return board_team == "MADAM"
+
+
+def get_team_counts(board_team: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        '''
+        SELECT p.position, COUNT(*)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s AND d.status='Elegida'
+        GROUP BY p.position
+        ''',
+        (board_team,),
+    )
+    counts = {row[0]: row[1] for row in cur.fetchall()}
+    cur.close()
+    conn.close()
+    return {
+        "Portera": counts.get("Portera", 0),
+        "Defensa": counts.get("Defensa", 0),
+        "Medio": counts.get("Medio", 0),
+        "Delantera": counts.get("Delantera", 0),
+    }
+
+
+def get_madam_used_legacy_teams():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        '''
+        SELECT DISTINCT COALESCE(NULLIF(TRIM(p.team), ''), '')
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team='MADAM'
+          AND d.status IN ('Objetivo','Elegida')
+          AND d.draft_round IN (1,2)
+          AND COALESCE(NULLIF(TRIM(p.team), ''), '') <> ''
+        ORDER BY 1
+        '''
+    )
+    rows = [r[0] for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return rows
+
+
 def list_users_data():
     conn = get_conn()
     cur = conn.cursor()
@@ -382,7 +431,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
 
-    if tab not in ["database", "objectives", "final"]:
+    if tab not in ["database", "objectives", "final", "draftday"]:
         tab = "database"
 
     if tab == "database":
@@ -422,6 +471,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     total, objetivos, elegidas, otros = get_stats(board_team)
     wildcard_name = get_wildcard(board_team)
+    team_counts = get_team_counts(board_team)
 
     def head(field, label):
         new_order = "desc" if (sort == field and order == "asc") else "asc"
@@ -489,6 +539,74 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             table_html = f"<form action='/save-all-objectives' method='post'>{save_all}<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{save_all}</form>"
         else:
             table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+
+    if tab == "draftday":
+        current_round = request.query_params.get("current_round", "1")
+        current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
+        round_direction = "1 → 16"
+        if current_round in (3, 4):
+            round_direction = "16 → 1"
+        elif current_round >= 5:
+            round_direction = "1 → 16" if current_round % 2 == 1 else "16 → 1"
+
+        rows = ""
+        for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
+            order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
+            actions_html = (
+                f"<div class='actions-toolbar'>"
+                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Elegida'><button class='btn-success action-btn' type='submit'>Elegida</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>"
+                f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
+                f"</div>"
+            )
+            rows += f"<tr><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td>{order_badge}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
+        if not rows:
+            rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
+
+        round_tabs = "".join([f"<a class='tab {'active' if current_round==i else ''}' href='/?tab=draftday&current_round={i}'>R{i}</a>" for i in range(1,11)])
+
+        madam_box = ""
+        if is_new_team(board_team):
+            used_teams = get_madam_used_legacy_teams()
+            used_list = "".join([f"<li>{html.escape(t)}</li>" for t in used_teams]) if used_teams else "<li class='muted'>Ningún equipo antiguo usado todavía</li>"
+            madam_box = (
+                "<div class='card'><h2>Regla especial MADAM (equipo nuevo)</h2>"
+                "<div class='muted'>En rondas 1 y 2, entre los equipos nuevos, solo puede salir una jugadora de cada equipo pre-existente. Este panel te ayuda a controlar qué clubes ya has tocado.</div>"
+                f"<div class='note-box' style='margin-top:12px;'><strong>Equipos antiguos usados en R1-R2:</strong><ul style='margin-top:10px;'>{used_list}</ul></div>"
+                "</div>"
+            )
+
+        table_html = f"<table><thead><tr><th>Nombre</th><th>Equipo actual</th><th>Posición</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+
+        content = (
+            f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
+            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='stats'>"
+            f"<div class='stat'><div class='muted'>Ronda actual</div><div class='stat-number'>{current_round}</div></div>"
+            f"<div class='stat'><div class='muted'>Orden de la ronda</div><div class='stat-number' style='font-size:22px'>{round_direction}</div></div>"
+            f"<div class='stat'><div class='muted'>Objetivos en esta ronda</div><div class='stat-number'>{len(players)}</div></div>"
+            f"<div class='stat'><div class='muted'>Draft elegidas</div><div class='stat-number'>{elegidas}</div></div>"
+            f"</div>"
+            f"<div class='tabs'>{round_tabs}</div>"
+            f"<div class='grid-2'>"
+            f"<div class='card'><h2>Targets de la ronda {current_round}</h2><div class='table-wrap'>{table_html}</div></div>"
+            f"<div>"
+            f"<div class='card'><h2>Composición actual</h2>"
+            f"<div class='note-box'><strong>Wildcard:</strong> {html.escape(wildcard_name or 'Pendiente')}</div>"
+            f"<div class='stats' style='margin-top:12px;grid-template-columns:repeat(2,1fr);'>"
+            f"<div class='stat'><div class='muted'>Porteras</div><div class='stat-number'>{team_counts['Portera']}</div></div>"
+            f"<div class='stat'><div class='muted'>Defensas</div><div class='stat-number'>{team_counts['Defensa']}</div></div>"
+            f"<div class='stat'><div class='muted'>Medios</div><div class='stat-number'>{team_counts['Medio']}</div></div>"
+            f"<div class='stat'><div class='muted'>Delanteras</div><div class='stat-number'>{team_counts['Delantera']}</div></div>"
+            f"</div>"
+            f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
+            f"</div>"
+            f"{madam_box}"
+            f"</div>"
+            f"</div>"
+        )
+        return page(content)
 
     admin_box = ""
     if user["is_admin"]:
@@ -575,7 +693,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
-        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras seleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a></div>"
+        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras seleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
         f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
