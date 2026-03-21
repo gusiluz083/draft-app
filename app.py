@@ -429,20 +429,35 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Objetivo</button></form>",
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
-            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
+            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
-            rows = "<tr><td colspan='6' class='muted'>No hay jugadoras.</td></tr>"
-        table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('status','Estado jugadora')}</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+            rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Pasar a Jugadoras seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers()'>Quitar selección</button></div>"
+        table_html = (
+            f"<form action='/bulk-objective' method='post'>"
+            f"{bulk_actions}"
+            f"<table><thead><tr>"
+            f"<th><input id='selectAllPlayers' type='checkbox' onclick='toggleSelectAll(this)'></th>"
+            f"<th>{head('name','Nombre')}</th>"
+            f"<th>{head('team','Equipo actual')}</th>"
+            f"<th>{head('position','Posición')}</th>"
+            f"<th>{head('status','Estado jugadora')}</th>"
+            f"<th>Notas</th>"
+            f"<th>Acciones</th>"
+            f"</tr></thead><tbody>{rows}</tbody></table>"
+            f"{bulk_actions}</form>"
+        )
     else:
         rows = ""
-        for pid, name, team, position, player_status, notes, decision_status, draft_round in players:
+        for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
             search_blob = " ".join([name or "", team or "", position or "", decision_status or "", notes or ""])
             round_display = draft_round if draft_round else ""
             actions = [f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>"]
             if tab == "objectives":
                 opts = "<option value=''>Ronda</option>" + "".join([f"<option value='{i}' {'selected' if draft_round==i else ''}>{i}</option>" for i in range(1, 11)])
+                order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
-                    f"<form class='inline-form' action='/round/{pid}' method='post'><select name='draft_round' style='width:90px;padding:6px 8px;'>{opts}</select><button class='btn-dark action-btn' type='submit'>Guardar</button></form>",
+                    f"<form class='inline-form actions-toolbar' action='/round/{pid}' method='post'><select name='draft_round' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order' style='width:90px;padding:6px 8px;'>{order_opts}</select><button class='btn-dark action-btn' type='submit'>Guardar</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Elegida'><button class='btn-success action-btn' type='submit'>Elegida</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
@@ -455,10 +470,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             actions_html = "<div class='actions-toolbar'>" + "".join(actions) + "</div>"
             round_class = f"round-{draft_round}" if draft_round else ""
             round_html = f"<span class='round-pill {round_class}'>{draft_round}</span>" if draft_round else ""
-            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
+            order_html = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
+            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
         if not rows:
-            rows = "<tr><td colspan='7' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
-        table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+            rows = "<tr><td colspan='8' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
+        table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
 
     admin_box = ""
     if user["is_admin"]:
@@ -653,6 +669,37 @@ def add(request: Request, name: str = Form(...), team: str = Form(""), position:
     return RedirectResponse("/?tab=database", status_code=303)
 
 
+@app.post("/bulk-objective")
+def bulk_objective(request: Request, player_ids: list[int] = Form([])):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    if not player_ids:
+        return RedirectResponse("/?tab=database", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        for player_id in player_ids:
+            cur.execute("SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
+            row = cur.fetchone()
+            if row:
+                cur.execute("UPDATE team_player_decisions SET status='Objetivo' WHERE board_team=%s AND player_id=%s", (board_team, player_id))
+            else:
+                cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, player_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=objectives", status_code=303)
+
+
 @app.post("/decision/{player_id}")
 def set_decision(player_id: int, request: Request, status: str = Form(...)):
     if not require_user(request):
@@ -681,22 +728,23 @@ def set_decision(player_id: int, request: Request, status: str = Form(...)):
 
 
 @app.post("/round/{player_id}")
-def save_round(player_id: int, request: Request, draft_round: str = Form("")):
+def save_round(player_id: int, request: Request, draft_round: str = Form(""), round_order: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
     round_value = int(draft_round) if str(draft_round).isdigit() else None
+    order_value = int(round_order) if str(round_order).isdigit() else None
 
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
     row = cur.fetchone()
     if row:
-        cur.execute("UPDATE team_player_decisions SET draft_round=%s, status='Objetivo' WHERE board_team=%s AND player_id=%s", (round_value, board_team, player_id))
+        cur.execute("UPDATE team_player_decisions SET draft_round=%s, round_order=%s, status='Objetivo' WHERE board_team=%s AND player_id=%s", (round_value, order_value, board_team, player_id))
     else:
-        cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status, draft_round) VALUES (%s,%s,'Objetivo',%s)", (board_team, player_id, round_value))
+        cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status, draft_round, round_order) VALUES (%s,%s,'Objetivo',%s,%s)", (board_team, player_id, round_value, order_value))
     conn.commit()
     cur.close()
     conn.close()
@@ -827,16 +875,16 @@ def export_excel(request: Request, tab: str = "database"):
         wanted = "Objetivo" if tab == "objectives" else "Elegida"
         cur.execute(
             '''
-            SELECT p.name, p.team, p.position, d.status, COALESCE(d.draft_round, NULL), COALESCE(p.notes,'')
+            SELECT p.name, p.team, p.position, d.status, COALESCE(d.draft_round, NULL), COALESCE(d.round_order, NULL), COALESCE(p.notes,'')
             FROM team_player_decisions d
             JOIN players p ON p.id = d.player_id
             WHERE d.board_team=%s AND d.status=%s
-            ORDER BY p.id DESC
+            ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
             ''',
             (board_team, wanted),
         )
         rows = cur.fetchall()
-        headers = ["Nombre", "Equipo actual", "Posición", "Estado", "Ronda", "Notas"]
+        headers = ["Nombre", "Equipo actual", "Posición", "Estado", "Ronda", "Orden", "Notas"]
     cur.close()
     conn.close()
 
