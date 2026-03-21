@@ -356,6 +356,17 @@ def risk_level(picks_remaining, round_order):
         return "MEDIO"
     return "BAJO"
 
+def enhanced_risk_level(picks_remaining, round_order, position, position_pressure):
+    base = risk_level(picks_remaining, round_order)
+    if base == "—":
+        return base
+    pressure = position_pressure.get(position, 0)
+    if pressure >= 3 and base == "MEDIO":
+        return "ALTO"
+    if pressure >= 2 and base == "BAJO":
+        return "MEDIO"
+    return base
+
 
     conn = get_conn()
     cur = conn.cursor()
@@ -553,6 +564,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"{bulk_actions}</form>"
         )
     else:
+        position_pressure = {}
+        for _pid, _name, _team, _position, _player_status, _notes, _decision_status, _draft_round, _round_order in players:
+            position_pressure[_position] = position_pressure.get(_position, 0) + 1
+
         rows = ""
         for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
             search_blob = " ".join([name or "", team or "", position or "", decision_status or "", notes or ""])
@@ -577,7 +592,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             round_class = f"round-{draft_round}" if draft_round else ""
             round_html = f"<span class='round-pill {round_class}'>{draft_round}</span>" if draft_round else ""
             order_html = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
-            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(notes or '')}</td><td>{risk_level(picks_remaining, round_order)}</td><td>{actions_html}</td></tr>"
+            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(notes or '')}</td><td>{enhanced_risk_level(picks_remaining, round_order, position, position_pressure)}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='8' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
         save_all = ""
@@ -604,6 +619,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         elif current_round >= 5:
             round_direction = "1 → 16" if current_round % 2 == 1 else "16 → 1"
 
+        position_pressure = {}
+        for _pid, _name, _team, _position, _player_status, _notes, _decision_status, _draft_round, _round_order in players:
+            position_pressure[_position] = position_pressure.get(_position, 0) + 1
+
         rows = ""
         for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
             order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
@@ -615,7 +634,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
                 f"</div>"
             )
-            rows += f"<tr><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td>{order_badge}</td><td>{html.escape(notes or '')}</td><td>{risk_level(picks_remaining, round_order)}</td><td>{actions_html}</td></tr>"
+            rows += f"<tr><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td>{order_badge}</td><td>{html.escape(notes or '')}</td><td>{enhanced_risk_level(picks_remaining, round_order, position, position_pressure)}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
@@ -694,6 +713,24 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='stat'><div class='muted'>Delanteras</div><div class='stat-number'>{team_counts['Delantera']}</div></div>"
             f"</div>"
             f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
+            f"</div>"
+            f"<div class='card'><h2>Simulador de picks rivales</h2>"
+            f"<div class='note-box'>"
+            f"<strong>Picks hasta tu turno:</strong> {picks_remaining if picks_remaining is not None else '—'}<br>"
+            f"<strong>Lectura rápida:</strong><br>"
+            f"• Si quedan pocos picks y tienes muchas {max(position_pressure, key=position_pressure.get) if position_pressure else 'jugadoras'} en la ronda, el riesgo sube.<br>"
+            f"• Si una posición concentra muchos targets, es más probable que otro equipo te la quite antes.<br>"
+            f"• Usa primero las jugadoras con riesgo <strong>ALTO</strong>."
+            f"</div>"
+            f"<div class='table-wrap' style='margin-top:12px;'><table>"
+            f"<thead><tr><th>Posición</th><th>Targets tuyos en la ronda</th><th>Presión estimada</th></tr></thead>"
+            f"<tbody>"
+            + ''.join([
+                f"<tr><td>{pos}</td><td>{cnt}</td><td>{'ALTA' if cnt >= 3 else 'MEDIA' if cnt == 2 else 'BAJA'}</td></tr>"
+                for pos, cnt in sorted(position_pressure.items())
+            ]) +
+            ("" if position_pressure else "<tr><td colspan='3' class='muted'>Sin targets cargados en esta ronda.</td></tr>") +
+            f"</tbody></table></div>"
             f"</div>"
             f"<div class='card'><h2>Bloqueadas / cogidas por otros equipos</h2><div class='table-wrap'>{blocked_html}</div></div>"
             f"{madam_box}"
