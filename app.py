@@ -35,6 +35,18 @@ def get_conn():
     try:
         cur = conn.cursor()
         cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS team_draftday_state (
+                id SERIAL PRIMARY KEY,
+                board_team TEXT NOT NULL,
+                current_round INTEGER DEFAULT 1,
+                current_pick INTEGER,
+                next_pick INTEGER,
+                UNIQUE(board_team)
+            )
+            """
+        )
         conn.commit()
         cur.close()
     except Exception:
@@ -96,16 +108,30 @@ def init_db():
             player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
             status TEXT NOT NULL DEFAULT 'Objetivo',
             draft_round INTEGER,
+            round_order INTEGER,
             UNIQUE(board_team, player_id)
         )
         """
     )
+    cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS team_wildcards (
             id SERIAL PRIMARY KEY,
             board_team TEXT NOT NULL,
             name TEXT NOT NULL,
+            UNIQUE(board_team)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_draftday_state (
+            id SERIAL PRIMARY KEY,
+            board_team TEXT NOT NULL,
+            current_round INTEGER DEFAULT 1,
+            current_pick INTEGER,
+            next_pick INTEGER,
             UNIQUE(board_team)
         )
         """
