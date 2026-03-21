@@ -685,10 +685,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
             actions_html = (
                 f"<div class='actions-toolbar'>"
-                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Elegida'><input type='hidden' name='source_tab' value='draftday'><button class='btn-success action-btn' type='submit'>Elegida</button></form>"
-                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><input type='hidden' name='source_tab' value='draftday'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
-                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Descartada'><input type='hidden' name='source_tab' value='draftday'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>"
-                f"<form class='inline-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Elegida'><input type='hidden' name='source_tab' value='draftday'><input type='hidden' name='current_round_form' value='{current_round}'><button class='btn-success action-btn' type='submit'>Elegida</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><input type='hidden' name='source_tab' value='draftday'><input type='hidden' name='current_round_form' value='{current_round}'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
+                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'><input type='hidden' name='status' value='Descartada'><input type='hidden' name='source_tab' value='draftday'><input type='hidden' name='current_round_form' value='{current_round}'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>"
+                f"<form class='inline-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post'><input type='hidden' name='current_round_form' value='{current_round}'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
                 f"</div>"
             )
             rows += f"<tr><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td>{order_badge}</td><td>{html.escape(notes or '')}</td><td>{enhanced_risk_level(picks_remaining, round_order, position, position_pressure)}</td><td>{actions_html}</td></tr>"
@@ -1244,7 +1244,7 @@ def reset_selected(request: Request):
 
 
 @app.post("/remove-objective/{player_id}")
-def remove_objective(player_id: int, request: Request):
+async def remove_objective(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
@@ -1267,6 +1267,9 @@ def remove_objective(player_id: int, request: Request):
 
     source_tab = request.query_params.get("source_tab", "")
     current_round = request.query_params.get("current_round", "")
+    if not current_round:
+        form = await request.form()
+        current_round = form.get("current_round_form", "")
     if source_tab == "draftday":
         return RedirectResponse("/?tab=draftday" + (f"&current_round={current_round}" if current_round else ""), status_code=303)
     return RedirectResponse("/?tab=objectives", status_code=303)
