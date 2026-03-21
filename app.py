@@ -330,6 +330,42 @@ def get_madam_used_legacy_teams():
     return rows
 
 
+def get_draftday_state(board_team: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COALESCE(current_round,1), current_pick, next_pick FROM team_draftday_state WHERE board_team=%s",
+        (board_team,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if row:
+        return {"current_round": row[0] or 1, "current_pick": row[1], "next_pick": row[2]}
+    return {"current_round": 1, "current_pick": None, "next_pick": None}
+
+
+def get_blocked_players(board_team: str, current_round: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        '''
+        SELECT p.name, p.team, p.position, COALESCE(d.draft_round, 0), COALESCE(d.round_order, 0)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s
+          AND d.status='Fichada por otro equipo'
+          AND COALESCE(d.draft_round, 0) = %s
+        ORDER BY COALESCE(d.round_order, 999), p.name
+        ''',
+        (board_team, current_round),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
 def list_users_data():
     conn = get_conn()
     cur = conn.cursor()
@@ -541,8 +577,16 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
 
     if tab == "draftday":
-        current_round = request.query_params.get("current_round", "1")
-        current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
+        draft_state = get_draftday_state(board_team)
+        query_round = request.query_params.get("current_round", "")
+        current_round = int(query_round) if str(query_round).isdigit() and 1 <= int(query_round) <= 10 else draft_state["current_round"]
+        current_round = current_round if 1 <= current_round <= 10 else 1
+        current_pick = draft_state["current_pick"]
+        next_pick = draft_state["next_pick"]
+        picks_remaining = None
+        if current_pick is not None and next_pick is not None:
+            picks_remaining = max(next_pick - current_pick, 0)
+
         round_direction = "1 → 16"
         if current_round in (3, 4):
             round_direction = "16 → 1"
@@ -564,6 +608,17 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not rows:
             rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
+        blocked_rows = ""
+        for b_name, b_team, b_position, b_round, b_order in get_blocked_players(board_team, current_round):
+            blocked_rows += (
+                f"<tr><td>{html.escape(b_name or '')}</td>"
+                f"<td>{html.escape(b_team or '')}</td>"
+                f"<td>{html.escape(b_position or '')}</td>"
+                f"<td>{html.escape(str(b_order or ''))}</td></tr>"
+            )
+        if not blocked_rows:
+            blocked_rows = "<tr><td colspan='4' class='muted'>No hay jugadoras bloqueadas en esta ronda.</td></tr>"
+
         round_tabs = "".join([f"<a class='tab {'active' if current_round==i else ''}' href='/?tab=draftday&current_round={i}'>R{i}</a>" for i in range(1,11)])
 
         madam_box = ""
@@ -578,15 +633,42 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         table_html = f"<table><thead><tr><th>Nombre</th><th>Equipo actual</th><th>Posición</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+        blocked_html = f"<table><thead><tr><th>Nombre</th><th>Equipo actual</th><th>Posición</th><th>Orden</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
+
+        pick_summary = "—"
+        if current_pick is not None and next_pick is not None:
+            pick_summary = f"Actual {current_pick} · Siguiente {next_pick}"
+        elif current_pick is not None:
+            pick_summary = f"Actual {current_pick}"
+        elif next_pick is not None:
+            pick_summary = f"Siguiente {next_pick}"
 
         content = (
             f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
-            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='actions-toolbar'>"
+            f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
+            f"<a class='btn btn-secondary' href='/?tab=objectives'>Seleccionadas</a>"
+            f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
+            f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
+            f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
+            f"<a class='btn btn-secondary' href='/logout'>Salir</a>"
+            f"</div></div>"
+            f"<div class='card'><h2>Control del draft</h2>"
+            f"<form action='/draftday-state' method='post'>"
+            f"<div class='grid'>"
+            f"<div><label>Ronda actual</label><select name='current_round'>"
+            + "".join([f"<option value='{i}' {'selected' if current_round==i else ''}>{i}</option>" for i in range(1,11)])
+            + f"</select></div>"
+            f"<div><label>Pick actual</label><input name='current_pick' value='{current_pick if current_pick is not None else ''}' placeholder='Ej. 23'></div>"
+            f"<div><label>Siguiente pick propio</label><input name='next_pick' value='{next_pick if next_pick is not None else ''}' placeholder='Ej. 31'></div>"
+            f"<div><button type='submit'>Guardar control draft</button></div>"
+            f"</div></form>"
+            f"</div>"
             f"<div class='stats'>"
             f"<div class='stat'><div class='muted'>Ronda actual</div><div class='stat-number'>{current_round}</div></div>"
             f"<div class='stat'><div class='muted'>Orden de la ronda</div><div class='stat-number' style='font-size:22px'>{round_direction}</div></div>"
-            f"<div class='stat'><div class='muted'>Objetivos en esta ronda</div><div class='stat-number'>{len(players)}</div></div>"
-            f"<div class='stat'><div class='muted'>Draft elegidas</div><div class='stat-number'>{elegidas}</div></div>"
+            f"<div class='stat'><div class='muted'>Pick / siguiente</div><div class='stat-number' style='font-size:20px'>{pick_summary}</div></div>"
+            f"<div class='stat'><div class='muted'>Picks hasta tu turno</div><div class='stat-number'>{picks_remaining if picks_remaining is not None else '—'}</div></div>"
             f"</div>"
             f"<div class='tabs'>{round_tabs}</div>"
             f"<div class='grid-2'>"
@@ -602,6 +684,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</div>"
             f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
             f"</div>"
+            f"<div class='card'><h2>Bloqueadas / cogidas por otros equipos</h2><div class='table-wrap'>{blocked_html}</div></div>"
             f"{madam_box}"
             f"</div>"
             f"</div>"
@@ -907,6 +990,48 @@ async def save_all_objectives(request: Request):
         conn.close()
 
     return RedirectResponse("/?tab=objectives", status_code=303)
+
+
+@app.post("/draftday-state")
+def save_draftday_state(
+    request: Request,
+    current_round: str = Form("1"),
+    current_pick: str = Form(""),
+    next_pick: str = Form(""),
+):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    round_value = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
+    current_pick_value = int(current_pick) if str(current_pick).isdigit() else None
+    next_pick_value = int(next_pick) if str(next_pick).isdigit() else None
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM team_draftday_state WHERE board_team=%s", (board_team,))
+        row = cur.fetchone()
+        if row:
+            cur.execute(
+                "UPDATE team_draftday_state SET current_round=%s, current_pick=%s, next_pick=%s WHERE board_team=%s",
+                (round_value, current_pick_value, next_pick_value, board_team),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO team_draftday_state (board_team, current_round, current_pick, next_pick) VALUES (%s,%s,%s,%s)",
+                (board_team, round_value, current_pick_value, next_pick_value),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse(f"/?tab=draftday&current_round={round_value}", status_code=303)
 
 
 @app.post("/remove-objective/{player_id}")
