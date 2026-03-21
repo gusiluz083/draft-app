@@ -432,7 +432,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Pasar a Jugadoras seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers()'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Pasar a Jugadoras seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form action='/bulk-objective' method='post'>"
             f"{bulk_actions}"
@@ -670,29 +670,50 @@ def add(request: Request, name: str = Form(...), team: str = Form(""), position:
 
 
 @app.post("/bulk-objective")
-def bulk_objective(request: Request, player_ids: list[int] = Form([])):
+def bulk_objective(request: Request, player_ids: list[str] = Form(None)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
 
-    if not player_ids:
+    raw_ids = player_ids or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+
+    cleaned_ids = []
+    for value in raw_ids:
+        try:
+            cleaned_ids.append(int(str(value).strip()))
+        except Exception:
+            pass
+
+    if not cleaned_ids:
         return RedirectResponse("/?tab=database", status_code=303)
 
     conn = get_conn()
     cur = conn.cursor()
     try:
-        for player_id in player_ids:
-            cur.execute("SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
+        for player_id in cleaned_ids:
+            cur.execute(
+                "SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s",
+                (board_team, player_id),
+            )
             row = cur.fetchone()
             if row:
-                cur.execute("UPDATE team_player_decisions SET status='Objetivo' WHERE board_team=%s AND player_id=%s", (board_team, player_id))
+                cur.execute(
+                    "UPDATE team_player_decisions SET status='Objetivo' WHERE board_team=%s AND player_id=%s",
+                    (board_team, player_id),
+                )
             else:
-                cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, player_id))
+                cur.execute(
+                    "INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')",
+                    (board_team, player_id),
+                )
         conn.commit()
     except Exception:
         conn.rollback()
+        raise
     finally:
         cur.close()
         conn.close()
