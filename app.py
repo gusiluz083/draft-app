@@ -623,7 +623,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
                     f"<div class='actions-toolbar'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Elegida'><button class='btn-success action-btn' type='submit'>Elegida</button></form>",
+                    f"<span class='pill objetivo'>Preparada</span>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
                     f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
@@ -646,7 +646,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             bulk_actions = (
                 "<div class='actions-toolbar' style='margin-bottom:12px;'>"
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
-                "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' name='status' value='Elegida'>Elegidas</button>"
+                "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Preparadas</button>"
                 "<button class='btn btn-secondary' type='submit' formaction='/bulk-selected-status' name='status' value='Fichada por otro equipo'>Otro equipo</button>"
                 "<button class='btn btn-danger' type='submit' formaction='/bulk-selected-status' name='status' value='Descartada'>Descartadas</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
@@ -1316,13 +1316,13 @@ def set_decision(player_id: int, request: Request, status: str = Form(...), sour
 
     current_round = current_round_form or request.query_params.get("current_round", "")
     if source_tab == "draftday":
+        if status == "Elegida":
+            return RedirectResponse("/?tab=final", status_code=303)
         target = "/?tab=draftday"
         if current_round:
             target += f"&current_round={current_round}"
         return RedirectResponse(target, status_code=303)
 
-    if status == "Elegida":
-        return RedirectResponse("/?tab=final", status_code=303)
     if status == "Objetivo":
         return RedirectResponse("/?tab=objectives", status_code=303)
     return RedirectResponse("/?tab=objectives", status_code=303)
