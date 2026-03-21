@@ -465,10 +465,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 opts = "<option value=''>Ronda</option>" + "".join([f"<option value='{i}' {'selected' if draft_round==i else ''}>{i}</option>" for i in range(1, 11)])
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
-                    f"<form class='inline-form actions-toolbar' action='/round/{pid}' method='post'><select name='draft_round' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order' style='width:90px;padding:6px 8px;'>{order_opts}</select><button class='btn-dark action-btn' type='submit'>Guardar</button></form>",
+                    f"<div class='actions-toolbar'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Elegida'><button class='btn-success action-btn' type='submit'>Elegida</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
+                    f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
                 ]
             else:
                 actions += [
@@ -482,7 +483,12 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='8' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
-        table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+        save_all = ""
+        if tab == "objectives":
+            save_all = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-dark' type='submit'>Guardar todo</button></div>"
+            table_html = f"<form action='/save-all-objectives' method='post'>{save_all}<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{save_all}</form>"
+        else:
+            table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
 
     admin_box = ""
     if user["is_admin"]:
@@ -722,6 +728,87 @@ def bulk_objective(request: Request, player_ids: list[str] = Form(None)):
     except Exception:
         conn.rollback()
         raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=objectives", status_code=303)
+
+
+@app.post("/save-all-objectives")
+async def save_all_objectives(request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    form = await request.form()
+    updates = []
+    for key, value in form.items():
+        if not key.startswith("draft_round_"):
+            continue
+        try:
+            player_id = int(key.replace("draft_round_", ""))
+        except Exception:
+            continue
+        round_value = int(str(value)) if str(value).strip().isdigit() else None
+        order_key = f"round_order_{player_id}"
+        order_raw = form.get(order_key, "")
+        order_value = int(str(order_raw)) if str(order_raw).strip().isdigit() else None
+        updates.append((player_id, round_value, order_value))
+
+    if not updates:
+        return RedirectResponse("/?tab=objectives", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        for player_id, round_value, order_value in updates:
+            cur.execute(
+                "SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s",
+                (board_team, player_id),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.execute(
+                    "UPDATE team_player_decisions SET draft_round=%s, round_order=%s, status='Objetivo' WHERE board_team=%s AND player_id=%s",
+                    (round_value, order_value, board_team, player_id),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO team_player_decisions (board_team, player_id, status, draft_round, round_order) VALUES (%s,%s,'Objetivo',%s,%s)",
+                    (board_team, player_id, round_value, order_value),
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=objectives", status_code=303)
+
+
+@app.post("/remove-objective/{player_id}")
+def remove_objective(player_id: int, request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM team_player_decisions WHERE board_team=%s AND player_id=%s AND status='Objetivo'",
+            (board_team, player_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
     finally:
         cur.close()
         conn.close()
