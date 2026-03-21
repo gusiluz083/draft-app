@@ -637,15 +637,27 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             round_class = f"round-{draft_round}" if draft_round else ""
             round_html = f"<span class='round-pill {round_class}'>{draft_round}</span>" if draft_round else ""
             order_html = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
-            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
+            select_cell = f"<input type='checkbox' name='selected_player_ids' value='{pid}'>" if tab == "objectives" else ""
+            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{select_cell}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
         if not rows:
-            rows = "<tr><td colspan='8' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
+            rows = "<tr><td colspan='9' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
         save_all = ""
         if tab == "objectives":
-            save_all = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-dark' type='submit'>Guardar todo</button></div>"
-            table_html = f"<form action='/save-all-objectives' method='post'>{save_all}<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{save_all}</form>"
+            bulk_actions = (
+                "<div class='actions-toolbar' style='margin-bottom:12px;'>"
+                "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
+                "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' name='status' value='Elegida'>Elegidas</button>"
+                "<button class='btn btn-secondary' type='submit' formaction='/bulk-selected-status' name='status' value='Fichada por otro equipo'>Otro equipo</button>"
+                "<button class='btn btn-danger' type='submit' formaction='/bulk-selected-status' name='status' value='Descartada'>Descartadas</button>"
+                "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
+                "<button class='btn btn-warning' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Objetivo</button>"
+                "<button class='btn btn-secondary' type='button' onclick='clearSelectedObjectives()'>Quitar selección</button>"
+                "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear todas las jugadoras seleccionadas de este equipo?')\">Reset seleccionadas</button>"
+                "</div>"
+            )
+            table_html = f"<form method='post'>{bulk_actions}<table><thead><tr><th><input id='selectAllObjectives' type='checkbox' onclick='toggleSelectAllSelected(this)'></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
         else:
-            table_html = f"<table><thead><tr><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+            table_html = f"<table><thead><tr><th></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
 
     if tab == "draftday":
         draft_state = get_draftday_state(board_team)
@@ -1125,6 +1137,110 @@ def save_draftday_state(
         conn.close()
 
     return RedirectResponse(f"/?tab=draftday&current_round={round_value}", status_code=303)
+
+
+@app.post("/bulk-selected-status")
+async def bulk_selected_status(request: Request, status: str = Form("Objetivo")):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    form = await request.form()
+    raw_ids = form.getlist("selected_player_ids")
+    player_ids = []
+    for value in raw_ids:
+        try:
+            player_ids.append(int(str(value).strip()))
+        except Exception:
+            pass
+
+    if not player_ids:
+        return RedirectResponse("/?tab=objectives", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        for player_id in player_ids:
+            cur.execute("SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
+            row = cur.fetchone()
+            if row:
+                cur.execute("UPDATE team_player_decisions SET status=%s WHERE board_team=%s AND player_id=%s", (status, board_team, player_id))
+            else:
+                cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,%s)", (board_team, player_id, status))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    target_tab = "final" if status == "Elegida" else "objectives"
+    return RedirectResponse(f"/?tab={target_tab}", status_code=303)
+
+
+@app.post("/bulk-selected-remove")
+async def bulk_selected_remove(request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    form = await request.form()
+    raw_ids = form.getlist("selected_player_ids")
+    player_ids = []
+    for value in raw_ids:
+        try:
+            player_ids.append(int(str(value).strip()))
+        except Exception:
+            pass
+
+    if not player_ids:
+        return RedirectResponse("/?tab=objectives", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        for player_id in player_ids:
+            cur.execute(
+                "DELETE FROM team_player_decisions WHERE board_team=%s AND player_id=%s AND status='Objetivo'",
+                (board_team, player_id),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=objectives", status_code=303)
+
+
+@app.post("/reset-selected")
+def reset_selected(request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM team_player_decisions WHERE board_team=%s", (board_team,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=objectives", status_code=303)
 
 
 @app.post("/remove-objective/{player_id}")
