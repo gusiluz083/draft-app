@@ -5,7 +5,7 @@ import html
 import hashlib
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from openpyxl import Workbook
 import psycopg2
 
@@ -235,6 +235,52 @@ function clearFilters(){
  if(rd) rd.value='';
  filterRows();
 }
+function updateDraftdayUi(data){
+ if(!data) return;
+ const byId = (id) => document.getElementById(id);
+ if(data.counts){
+   if(byId('dd-count-portera')) byId('dd-count-portera').textContent = data.counts.Portera ?? 0;
+   if(byId('dd-count-defensa')) byId('dd-count-defensa').textContent = data.counts.Defensa ?? 0;
+   if(byId('dd-count-medio')) byId('dd-count-medio').textContent = data.counts.Medio ?? 0;
+   if(byId('dd-count-delantera')) byId('dd-count-delantera').textContent = data.counts.Delantera ?? 0;
+ }
+ if(typeof data.elegidas !== 'undefined' && byId('dd-draft-elegidas')) byId('dd-draft-elegidas').textContent = data.elegidas;
+ if(typeof data.targets_remaining !== 'undefined' && byId('dd-targets-round')) byId('dd-targets-round').textContent = data.targets_remaining;
+}
+function refreshDraftdayEmptyState(){
+ const body = document.querySelector('.draftday-table tbody');
+ if(!body) return;
+ const liveRows = body.querySelectorAll('tr[data-draftday-row="1"]');
+ const empty = body.querySelector('tr[data-draftday-empty="1"]');
+ if(liveRows.length===0 && !empty){
+   const tr=document.createElement('tr');
+   tr.setAttribute('data-draftday-empty','1');
+   tr.innerHTML = "<td colspan='5' class='muted'>No hay jugadoras marcadas para esta ronda.</td>";
+   body.appendChild(tr);
+ }
+ if(liveRows.length>0 && empty) empty.remove();
+}
+document.addEventListener('submit', async (e)=>{
+ const form = e.target;
+ if(!form || !form.closest('.draftday-actions')) return;
+ e.preventDefault();
+ const fd = new FormData(form);
+ fd.append('ajax','1');
+ try{
+   const res = await fetch(form.action, {method:'POST', body: fd, credentials:'same-origin'});
+   if(!res.ok){
+     form.submit();
+     return;
+   }
+   const data = await res.json();
+   const row = form.closest('tr');
+   if(row) row.remove();
+   updateDraftdayUi(data);
+   refreshDraftdayEmptyState();
+ }catch(err){
+   form.submit();
+ }
+});
 document.addEventListener('DOMContentLoaded',()=>{
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
@@ -243,6 +289,7 @@ document.addEventListener('DOMContentLoaded',()=>{
  if(st) st.addEventListener('change',filterRows);
  if(rd) rd.addEventListener('change',filterRows);
  filterRows();
+ refreshDraftdayEmptyState();
 });
 </script>
 """
@@ -716,7 +763,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(position, (position or "")[:3].upper())
             risk_text = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
             note_short = html.escape(notes or "")
-            rows += f"<tr><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
+            rows += f"<tr data-draftday-row='1'><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
@@ -790,10 +837,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='card'><h2>Composición actual</h2>"
             f"<div class='note-box'><strong>Wildcard:</strong> {html.escape(wildcard_name or 'Pendiente')}</div>"
             f"<div class='stats' style='margin-top:12px;grid-template-columns:repeat(2,1fr);'>"
-            f"<div class='stat'><div class='muted'>Porteras</div><div class='stat-number'>{team_counts['Portera']}</div></div>"
-            f"<div class='stat'><div class='muted'>Defensas</div><div class='stat-number'>{team_counts['Defensa']}</div></div>"
-            f"<div class='stat'><div class='muted'>Medios</div><div class='stat-number'>{team_counts['Medio']}</div></div>"
-            f"<div class='stat'><div class='muted'>Delanteras</div><div class='stat-number'>{team_counts['Delantera']}</div></div>"
+            f"<div class='stat'><div class='muted'>Porteras</div><div id='dd-count-portera' class='stat-number'>{team_counts['Portera']}</div></div>"
+            f"<div class='stat'><div class='muted'>Defensas</div><div id='dd-count-defensa' class='stat-number'>{team_counts['Defensa']}</div></div>"
+            f"<div class='stat'><div class='muted'>Medios</div><div id='dd-count-medio' class='stat-number'>{team_counts['Medio']}</div></div>"
+            f"<div class='stat'><div class='muted'>Delanteras</div><div id='dd-count-delantera' class='stat-number'>{team_counts['Delantera']}</div></div>"
             f"</div>"
             f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
             f"</div>"
@@ -1326,9 +1373,32 @@ async def remove_objective(player_id: int, request: Request):
 
     source_tab = request.query_params.get("source_tab", "")
     current_round = request.query_params.get("current_round", "")
+    form = await request.form()
     if not current_round:
-        form = await request.form()
         current_round = form.get("current_round_form", "")
+
+    ajax = form.get("ajax", "") if 'form' in locals() else ""
+    if ajax == "1":
+        counts = get_team_counts(board_team)
+        total, objetivos, elegidas, otros = get_stats(board_team)
+        targets_remaining = None
+        if current_round and str(current_round).isdigit():
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM team_player_decisions WHERE board_team=%s AND status='Objetivo' AND COALESCE(draft_round,0)=%s",
+                (board_team, int(current_round)),
+            )
+            targets_remaining = cur.fetchone()[0]
+            cur.close()
+            conn.close()
+        return JSONResponse({
+            "ok": True,
+            "status": "removed",
+            "counts": counts,
+            "elegidas": elegidas,
+            "targets_remaining": targets_remaining,
+        })
 
     if source_tab == "draftday":
         target = "/?tab=draftday"
@@ -1340,7 +1410,7 @@ async def remove_objective(player_id: int, request: Request):
 
 
 @app.post("/decision/{player_id}")
-def set_decision(player_id: int, request: Request, status: str = Form(...), source_tab: str = Form(""), current_round_form: str = Form("")):
+def set_decision(player_id: int, request: Request, status: str = Form(...), source_tab: str = Form(""), current_round_form: str = Form(""), ajax: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
@@ -1360,6 +1430,28 @@ def set_decision(player_id: int, request: Request, status: str = Form(...), sour
     conn.close()
 
     current_round = current_round_form or request.query_params.get("current_round", "")
+    if ajax == "1":
+        counts = get_team_counts(board_team)
+        total, objetivos, elegidas, otros = get_stats(board_team)
+        targets_remaining = None
+        if current_round and str(current_round).isdigit():
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM team_player_decisions WHERE board_team=%s AND status='Objetivo' AND COALESCE(draft_round,0)=%s",
+                (board_team, int(current_round)),
+            )
+            targets_remaining = cur.fetchone()[0]
+            cur.close()
+            conn.close()
+        return JSONResponse({
+            "ok": True,
+            "status": status,
+            "counts": counts,
+            "elegidas": elegidas,
+            "targets_remaining": targets_remaining,
+        })
+
     if source_tab == "draftday":
         if status == "Elegida":
             return RedirectResponse("/?tab=final", status_code=303)
