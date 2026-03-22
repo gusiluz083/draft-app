@@ -247,6 +247,33 @@ function updateDraftdayUi(data){
  if(typeof data.elegidas !== 'undefined' && byId('dd-draft-elegidas')) byId('dd-draft-elegidas').textContent = data.elegidas;
  if(typeof data.targets_remaining !== 'undefined' && byId('dd-targets-round')) byId('dd-targets-round').textContent = data.targets_remaining;
 }
+function bumpCount(id, delta){
+ const el = document.getElementById(id);
+ if(!el) return;
+ const current = parseInt((el.textContent||'0').trim(), 10);
+ if(Number.isNaN(current)) return;
+ el.textContent = Math.max(0, current + delta);
+}
+function manualDraftdayUiAfterAction(form){
+ const statusInput = form.querySelector("input[name='status']");
+ const status = statusInput ? statusInput.value : '';
+ const row = form.closest('tr');
+ const posCell = row ? row.querySelector('.pos-mini') : null;
+ const pos = posCell ? (posCell.textContent || '').trim().toUpperCase() : '';
+ if(status === 'Elegida'){
+   if(pos === 'POR') bumpCount('dd-count-portera', 1);
+   if(pos === 'DEF') bumpCount('dd-count-defensa', 1);
+   if(pos === 'MED') bumpCount('dd-count-medio', 1);
+   if(pos === 'DEL') bumpCount('dd-count-delantera', 1);
+   bumpCount('dd-draft-elegidas', 1);
+ }
+ if(status === 'Elegida' || status === 'Fichada por otro equipo' || status === 'Descartada'){
+   bumpCount('dd-targets-round', -1);
+ }
+ if(form.action.includes('/remove-objective/')){
+   bumpCount('dd-targets-round', -1);
+ }
+}
 function refreshDraftdayEmptyState(){
  const body = document.querySelector('.draftday-table tbody');
  if(!body) return;
@@ -273,6 +300,7 @@ document.addEventListener('submit', async (e)=>{
      return;
    }
    const data = await res.json();
+   manualDraftdayUiAfterAction(form);
    const row = form.closest('tr');
    if(row) row.remove();
    updateDraftdayUi(data);
