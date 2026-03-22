@@ -587,13 +587,13 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             search_blob = " ".join([name or "", team or "", position or "", status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
-                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Objetivo</button></form>",
+                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a objetivos</button></form>",
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Pasar a Jugadoras seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a objetivos</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form action='/bulk-objective' method='post'>"
             f"{bulk_actions}"
@@ -623,7 +623,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
                     f"<div class='actions-toolbar'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
-                    f"<span class='pill objetivo'>Preparada</span>",
+                    f"<span class='pill objetivo'>Objetivo</span>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
                     f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
@@ -646,7 +646,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             bulk_actions = (
                 "<div class='actions-toolbar' style='margin-bottom:12px;'>"
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
-                "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Preparadas</button>"
+                "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Objetivo</button>"
                 "<button class='btn btn-secondary' type='submit' formaction='/bulk-selected-status' name='status' value='Fichada por otro equipo'>Otro equipo</button>"
                 "<button class='btn btn-danger' type='submit' formaction='/bulk-selected-status' name='status' value='Descartada'>Descartadas</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
