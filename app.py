@@ -235,6 +235,26 @@ function clearFilters(){
  if(rd) rd.value='';
  filterRows();
 }
+function filterAllBoard(){
+ const s=document.getElementById('allBoardSearch');
+ const rd=document.getElementById('allBoardRound');
+ const text=normalizeText(s ? s.value : '');
+ const round=normalizeText(rd ? rd.value : '');
+ const rows=document.querySelectorAll("tr[data-all-board-row='1']");
+ rows.forEach((row)=>{
+   const hay=normalizeText(row.dataset.search||'');
+   const rr=normalizeText(row.dataset.round||'');
+   const show=(!text||hay.includes(text))&&(!round||rr===round);
+   row.style.display=show?'':'none';
+ });
+}
+function clearAllBoardFilters(){
+ const s=document.getElementById('allBoardSearch');
+ const rd=document.getElementById('allBoardRound');
+ if(s) s.value='';
+ if(rd) rd.value='';
+ filterAllBoard();
+}
 function updateDraftdayUi(data){
  if(!data) return;
  const byId = (id) => document.getElementById(id);
@@ -411,6 +431,25 @@ def get_blocked_players(board_team: str, current_round: int):
         ORDER BY COALESCE(d.round_order, 999), p.name
         ''',
         (board_team, current_round),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_all_objectives(board_team: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        '''
+        SELECT p.id, p.name, p.team, p.position, COALESCE(p.notes,''), d.status, d.draft_round, d.round_order
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s AND d.status='Objetivo'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name
+        ''',
+        (board_team,),
     )
     rows = cur.fetchall()
     cur.close()
@@ -746,6 +785,27 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not rows:
             rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
+        all_objectives_rows = ""
+        for apid, aname, ateam, aposition, anotes, astatus, adraft_round, around_order in get_all_objectives(board_team):
+            apos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(aposition, (aposition or "")[:3].upper())
+            around_text = str(adraft_round or "")
+            asearch = " ".join([aname or "", ateam or "", aposition or "", anotes or "", around_text])
+            all_objectives_rows += (
+                f"<tr data-all-board-row='1' data-round='{html.escape(around_text)}' data-search='{html.escape(asearch)}'>"
+                f"<td>{html.escape(aname or '')}</td>"
+                f"<td>{html.escape(around_text)}</td>"
+                f"<td>{html.escape(str(around_order or ''))}</td>"
+                f"<td>{html.escape(apos_short)}</td>"
+                f"<td><form class='inline-form' action='/decision/{apid}?current_round={current_round}' method='post'>"
+                f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
+                f"<input type='hidden' name='source_tab' value='draftday'>"
+                f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+                f"<button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form></td>"
+                f"</tr>"
+            )
+        if not all_objectives_rows:
+            all_objectives_rows = "<tr><td colspan='5' class='muted'>No tienes jugadoras activas en Draft Day.</td></tr>"
+
         blocked_rows = ""
         for b_name, b_team, b_position, b_round, b_order in get_blocked_players(board_team, current_round):
             b_pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(b_position, (b_position or "")[:3].upper())
@@ -772,6 +832,17 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+        all_board_html = (
+            "<div class='allboard-toolbar'>"
+            "<input id='allBoardSearch' placeholder='Buscar jugadora...'>"
+            "<select id='allBoardRound'>"
+            "<option value=''>Todas las rondas</option>"
+            + "".join([f"<option value='{i}'>{i}</option>" for i in range(1,11)])
+            + "</select>"
+            "<button class='btn btn-light' type='button' onclick='clearAllBoardFilters()'>Limpiar</button>"
+            "</div>"
+            + f"<table class='draftday-table allboard-table'><thead><tr><th>Jugadora</th><th>R</th><th>Ord</th><th>Pos</th><th>Acción</th></tr></thead><tbody>{all_objectives_rows}</tbody></table>"
+        )
         blocked_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Ord</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
 
         pick_summary = "—"
@@ -811,7 +882,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</div>"
             f"<div class='tabs'>{round_tabs}</div>"
             f"<div class='draftday-grid'>"
-            f"<div class='card'><h2>Targets de la ronda {current_round}</h2><div class='table-wrap'>{table_html}</div></div>"
+            f"<div><div class='card'><h2>Targets de la ronda {current_round}</h2><div class='table-wrap'>{table_html}</div></div>"
+            f"<div class='card' style='margin-top:16px;'><h2>Control global de todas las rondas</h2><div class='muted'>Usa este filtro para localizar cualquier jugadora de cualquier ronda y marcarla rápidamente como fichada por otro equipo.</div><div class='table-wrap' style='margin-top:10px;'>{all_board_html}</div></div></div>"
             f"<div>"
             f"<div class='card'><h2>Composición actual</h2>"
             f"<div class='note-box'><strong>Wildcard:</strong> {html.escape(wildcard_name or 'Pendiente')}</div>"
