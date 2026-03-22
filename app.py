@@ -739,7 +739,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
             order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
             actions_html = (
-                f"<div class='actions-toolbar'>"
+                f"<div class='draftday-actions'>"
                 f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'>"
                 f"<input type='hidden' name='status' value='Elegida'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
@@ -749,7 +749,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
-                f"<button class='btn-secondary action-btn' type='submit'></button></form>"
+                f"<button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
                 f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'>"
                 f"<input type='hidden' name='status' value='Descartada'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
@@ -805,7 +805,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
-            f"<div class='actions-toolbar'>"
+            f"<div class='draftday-actions'>"
             f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
             f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
             f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
@@ -1453,8 +1453,6 @@ def set_decision(player_id: int, request: Request, status: str = Form(...), sour
         })
 
     if source_tab == "draftday":
-        if status == "Elegida":
-            return RedirectResponse("/?tab=final", status_code=303)
         target = "/?tab=draftday"
         if current_round:
             target += f"&current_round={current_round}"
