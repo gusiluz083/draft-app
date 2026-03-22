@@ -1739,3 +1739,26 @@ def export_excel(request: Request, tab: str = "database"):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={board_team.lower()}_{tab}.xlsx"},
     )
+
+
+# --- SAFE ADMIN BOOT FIX OVERRIDE ---
+def ensure_admin():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USER,))
+    row = cur.fetchone()
+
+    if row:
+        cur.execute(
+            "UPDATE users SET password_hash = %s, is_admin = TRUE WHERE username = %s",
+            (hash_text(ADMIN_PASSWORD), ADMIN_USER),
+        )
+    else:
+        cur.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s)",
+            (ADMIN_USER, hash_text(ADMIN_PASSWORD), True),
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
