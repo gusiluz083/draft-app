@@ -587,13 +587,13 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             search_blob = " ".join([name or "", team or "", position or "", status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
-                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a objetivos</button></form>",
+                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a objetivos</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form action='/bulk-objective' method='post'>"
             f"{bulk_actions}"
@@ -652,7 +652,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
                 "<button class='btn btn-warning' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Objetivo</button>"
                 "<button class='btn btn-secondary' type='button' onclick='clearSelectedObjectives()'>Quitar selección</button>"
-                "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear todas las jugadoras seleccionadas de este equipo?')\">Reset seleccionadas</button>"
+                "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear todas las jugadoras seleccionadas de este equipo?')\">Reset preselección</button>"
                 "</div>"
             )
             table_html = f"<form method='post'>{bulk_actions}<table><thead><tr><th><input id='selectAllObjectives' type='checkbox' onclick='toggleSelectAllSelected(this)'></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
@@ -895,14 +895,14 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
-        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras seleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
+        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
         f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
         f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
         f"{"<div><label>Ronda</label><select id='liveRound'><option value=''>Todas</option>" + ''.join([f"<option value='{i}'>{i}</option>" for i in range(1,11)]) + "</select></div>" if tab == 'objectives' else "<div><label>Ronda</label><select id='liveRound' disabled><option value=''>No aplica</option></select></div>"}"
         f"</div><div style='margin-top:12px;'><button type='button' class='btn btn-secondary' onclick='clearFilters()'>Limpiar</button></div><div class='muted' style='margin-top:10px;'>Mostrando <strong id='visibleCount'>0</strong> jugadoras</div></div>"
-        f"<div class='card'><h2>{'Jugadoras' if tab=='database' else 'Jugadoras seleccionadas de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
+        f"<div class='card'><h2>{'Jugadoras' if tab=='database' else 'Jugadoras preseleccionadas de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
     )
     return page(content)
 
