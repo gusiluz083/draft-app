@@ -56,7 +56,6 @@ def get_conn():
 
 
 def ensure_admin():
-    team_value = "" if is_admin == "1" else (team if team in TEAMS else "")
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USER,))
