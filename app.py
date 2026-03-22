@@ -35,6 +35,7 @@ def get_conn():
     try:
         cur = conn.cursor()
         cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_draftday_state (
@@ -309,13 +310,13 @@ def get_current_user(request: Request):
         return None
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, is_admin FROM users")
+    cur.execute("SELECT id, username, is_admin, COALESCE(team,'') FROM users")
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    for user_id, username, is_admin in rows:
+    for user_id, username, is_admin, team in rows:
         if token == hash_text(f"{username}:{user_id}"):
-            return {"id": user_id, "username": username, "is_admin": is_admin}
+            return {"id": user_id, "username": username, "is_admin": is_admin, "team": team}
     return None
 
 
@@ -324,6 +325,9 @@ def require_user(request: Request):
 
 
 def get_team(request: Request):
+    user = get_current_user(request)
+    if user and (not user.get("is_admin")) and user.get("team") in TEAMS:
+        return user.get("team")
     team = request.cookies.get(TEAM_COOKIE, "")
     return team if team in TEAMS else None
 
@@ -586,8 +590,11 @@ def select_team_page(request: Request):
 
 @app.post("/select-team")
 def select_team(request: Request, team: str = Form(...)):
-    if not require_user(request):
+    user = require_user(request)
+    if not user:
         return RedirectResponse("/login", status_code=303)
+    if not user.get("is_admin"):
+        return RedirectResponse("/", status_code=303)
     if team not in TEAMS:
         return RedirectResponse("/select-team", status_code=303)
     r = RedirectResponse("/", status_code=303)
@@ -926,11 +933,15 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         return page(content)
 
     admin_box = ""
+    team_lock_notice = ""
+    if (not user["is_admin"]) and user.get("team") in TEAMS:
+        team_lock_notice = f"<div class='card'><strong>Equipo asignado:</strong> {html.escape(user.get('team'))}. Este usuario solo puede acceder a ese equipo.</div>"
     if user["is_admin"]:
         user_rows = ""
-        for uid, uname, is_admin_flag, created_at in list_users_data():
+        for uid, uname, is_admin_flag, team_value, created_at in list_users_data():
             created_text = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
             role_text = "Admin" if is_admin_flag else "Usuario"
+            team_text = "Todos" if is_admin_flag else (team_value or "Sin equipo")
             role_options = (
                 f"<option value='0' {'selected' if not is_admin_flag else ''}>Usuario</option>"
                 f"<option value='1' {'selected' if is_admin_flag else ''}>Admin</option>"
