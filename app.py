@@ -556,6 +556,18 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         """
         cur.execute(sql)
         players = cur.fetchall()
+    elif tab == "draftday":
+        current_round = request.query_params.get("current_round", "1")
+        current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
+        sql = """
+            SELECT p.id, p.name, p.team, p.position, p.status, COALESCE(p.notes,''), d.status, d.draft_round, d.round_order
+            FROM team_player_decisions d
+            JOIN players p ON p.id = d.player_id
+            WHERE d.board_team = %s AND d.status = 'Objetivo' AND COALESCE(d.draft_round, 0) = %s
+            ORDER BY COALESCE(d.round_order, 999) ASC, p.name ASC
+        """
+        cur.execute(sql, (board_team, current_round))
+        players = cur.fetchall()
     else:
         wanted = "Objetivo" if tab == "objectives" else "Elegida"
         sort_expr = "d.status" if sort == "decision_status" else ("d.draft_round" if sort == "draft_round" else "p." + sort)
@@ -623,8 +635,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
                     f"<div class='actions-toolbar'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn btn-warning action-btn' type='submit'>Añadir a Draft Day</button></form>",
-                    f"<form class='inline-form' action='/remove-objective/{pid}' method='post'><button class='btn btn-light action-btn' type='submit'>Quitar</button></form>",
+                    f"<button class='btn btn-warning action-btn' type='submit' formaction='/prepare-draftday/{pid}' formmethod='post'>Añadir a Draft Day</button>",
+                    f"<button class='btn btn-light action-btn' type='submit' formaction='/remove-objective/{pid}' formmethod='post'>Quitar</button>",
                 ]
             else:
                 actions += [
@@ -645,7 +657,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             bulk_actions = (
                 "<div class='actions-toolbar' style='margin-bottom:12px;'>"
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
-                "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Añadir a Draft Day</button>"
+                "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' formmethod='post' name='status' value='Objetivo'>Añadir a Draft Day</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
                 "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear toda la preselección de este equipo?')\">Reset preselección</button>"
                 "</div>"
@@ -1187,8 +1199,7 @@ async def bulk_selected_status(request: Request, status: str = Form("Objetivo"))
         cur.close()
         conn.close()
 
-    target_tab = "final" if status == "Elegida" else "objectives"
-    return RedirectResponse(f"/?tab={target_tab}", status_code=303)
+    return RedirectResponse("/?tab=objectives", status_code=303)
 
 
 @app.post("/bulk-selected-remove")
@@ -1242,6 +1253,40 @@ def reset_selected(request: Request):
     cur = conn.cursor()
     try:
         cur.execute("DELETE FROM team_player_decisions WHERE board_team=%s", (board_team,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=objectives", status_code=303)
+
+
+@app.post("/prepare-draftday/{player_id}")
+async def prepare_draftday(player_id: int, request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    form = await request.form()
+    round_raw = form.get(f"draft_round_{player_id}", "")
+    order_raw = form.get(f"round_order_{player_id}", "")
+    round_value = int(str(round_raw)) if str(round_raw).isdigit() else None
+    order_value = int(str(order_raw)) if str(order_raw).isdigit() else None
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
+        row = cur.fetchone()
+        if row:
+            cur.execute("UPDATE team_player_decisions SET status='Objetivo', draft_round=%s, round_order=%s WHERE board_team=%s AND player_id=%s", (round_value, order_value, board_team, player_id))
+        else:
+            cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status, draft_round, round_order) VALUES (%s,%s,'Objetivo',%s,%s)", (board_team, player_id, round_value, order_value))
         conn.commit()
     except Exception:
         conn.rollback()
