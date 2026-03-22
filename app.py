@@ -688,7 +688,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             else:
                 actions += [
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'></button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
                 ]
             actions_html = "<div class='actions-toolbar'>" + "".join(actions) + "</div>"
             round_class = f"round-{draft_round}" if draft_round else ""
@@ -744,7 +744,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<input type='hidden' name='status' value='Elegida'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
-                f"<button class='btn-success action-btn' type='submit'>Elegida</button></form>"
+                f"<button class='btn-success action-btn' type='submit'>Firmada</button></form>"
                 f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'>"
                 f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
