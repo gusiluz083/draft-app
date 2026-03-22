@@ -883,7 +883,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='tabs'>{round_tabs}</div>"
             f"<div class='draftday-grid'>"
             f"<div><div class='card'><h2>Targets de la ronda {current_round}</h2><div class='table-wrap'>{table_html}</div></div>"
-            f"<div class='card' style='margin-top:16px;'><h2>Control global de todas las rondas</h2><div class='muted'>Usa este filtro para localizar cualquier jugadora de cualquier ronda y marcarla rápidamente como fichada por otro equipo.</div><div class='table-wrap' style='margin-top:10px;'>{all_board_html}</div></div></div>"
+            f"<details class='card' style='margin-top:16px;'><summary style="cursor:pointer;font-weight:600;">Control global de todas las rondas (mostrar / ocultar)</summary><div style='margin-top:10px;'><div class='muted'>Usa este filtro para localizar cualquier jugadora de cualquier ronda y marcarla rápidamente como fichada por otro equipo.</div><div class='table-wrap' style='margin-top:10px;'>{all_board_html}</div></div></div>"
             f"<div>"
             f"<div class='card'><h2>Composición actual</h2>"
             f"<div class='note-box'><strong>Wildcard:</strong> {html.escape(wildcard_name or 'Pendiente')}</div>"
