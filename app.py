@@ -307,6 +307,18 @@ if(roleSel){
  roleSel.addEventListener('change', syncCreateUserTeam);
  syncCreateUserTeam();
 }
+const roleSel=document.getElementById('createUserRole');
+const teamSel=document.getElementById('createUserTeam');
+function syncCreateUserTeam(){
+ if(!roleSel || !teamSel) return;
+ const isAdmin = roleSel.value === '1';
+ teamSel.disabled = isAdmin;
+ if(isAdmin) teamSel.value = '';
+}
+if(roleSel){
+ roleSel.addEventListener('change', syncCreateUserTeam);
+ syncCreateUserTeam();
+}
 if(typeof refreshDraftdayEmptyState === 'function') refreshDraftdayEmptyState();
 });
 </script>
