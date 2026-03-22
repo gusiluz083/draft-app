@@ -602,7 +602,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
-            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
+            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
         bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'></button></div>"
@@ -634,7 +634,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 opts = "<option value=''>Ronda</option>" + "".join([f"<option value='{i}' {'selected' if draft_round==i else ''}>{i}</option>" for i in range(1, 11)])
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
                 actions += [
-                    f"<div class='actions-toolbar'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
+                    f"<div class='draftday-actions'><select name='draft_round_{pid}' style='width:90px;padding:6px 8px;'>{opts}</select><select name='round_order_{pid}' style='width:90px;padding:6px 8px;'>{order_opts}</select></div>",
                     f"<button class='btn btn-warning action-btn' type='submit' formaction='/prepare-draftday/{pid}' formmethod='post'>Añadir a Draft Day</button>",
                     f"<button class='btn btn-light action-btn' type='submit' formaction='/remove-objective/{pid}' formmethod='post'>Quitar</button>",
                 ]
@@ -713,16 +713,20 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
                 f"</div>"
             )
-            rows += f"<tr><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td>{order_badge}</td><td>{html.escape(notes or '')}</td><td>{enhanced_risk_level(picks_remaining, round_order, position, position_pressure)}</td><td>{actions_html}</td></tr>"
+            pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(position, (position or "")[:3].upper())
+            risk_text = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
+            note_short = html.escape(notes or "")
+            rows += f"<tr><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
         blocked_rows = ""
         for b_name, b_team, b_position, b_round, b_order in get_blocked_players(board_team, current_round):
+            b_pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(b_position, (b_position or "")[:3].upper())
             blocked_rows += (
                 f"<tr><td>{html.escape(b_name or '')}</td>"
-                f"<td>{html.escape(b_team or '')}</td>"
-                f"<td>{html.escape(b_position or '')}</td>"
+                f"<td>{html.escape((b_team or '')[:10])}</td>"
+                f"<td>{html.escape(b_pos_short)}</td>"
                 f"<td>{html.escape(str(b_order or ''))}</td></tr>"
             )
         if not blocked_rows:
@@ -741,8 +745,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "</div>"
             )
 
-        table_html = f"<table><thead><tr><th>Nombre</th><th>Equipo actual</th><th>Posición</th><th>Orden</th><th>Notas</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
-        blocked_html = f"<table><thead><tr><th>Nombre</th><th>Equipo actual</th><th>Posición</th><th>Orden</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
+        table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+        blocked_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Ord</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
 
         pick_summary = "—"
         if current_pick is not None and next_pick is not None:
@@ -756,7 +760,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
             f"<div class='actions-toolbar'>"
             f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
-            f"<a class='btn btn-secondary' href='/?tab=objectives'>Seleccionadas</a>"
+            f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
             f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
             f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
             f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
@@ -780,7 +784,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='stat'><div class='muted'>Picks hasta tu turno</div><div class='stat-number'>{picks_remaining if picks_remaining is not None else '—'}</div></div>"
             f"</div>"
             f"<div class='tabs'>{round_tabs}</div>"
-            f"<div class='grid-2'>"
+            f"<div class='draftday-grid'>"
             f"<div class='card'><h2>Targets de la ronda {current_round}</h2><div class='table-wrap'>{table_html}</div></div>"
             f"<div>"
             f"<div class='card'><h2>Composición actual</h2>"
