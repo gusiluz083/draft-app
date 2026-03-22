@@ -56,6 +56,7 @@ def get_conn():
 
 
 def ensure_admin():
+    team_value = "" if is_admin == "1" else (team if team in TEAMS else "")
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USER,))
@@ -294,7 +295,19 @@ document.addEventListener('DOMContentLoaded',()=>{
  if(abr) abr.addEventListener('change',filterAllBoard);
  filterRows();
  filterAllBoard();
- if(typeof refreshDraftdayEmptyState === 'function') refreshDraftdayEmptyState();
+ const roleSel=document.getElementById('createUserRole');
+const teamSel=document.getElementById('createUserTeam');
+function syncCreateUserTeam(){
+ if(!roleSel || !teamSel) return;
+ const isAdmin = roleSel.value === '1';
+ teamSel.disabled = isAdmin;
+ if(isAdmin) teamSel.value = '';
+}
+if(roleSel){
+ roleSel.addEventListener('change', syncCreateUserTeam);
+ syncCreateUserTeam();
+}
+if(typeof refreshDraftdayEmptyState === 'function') refreshDraftdayEmptyState();
 });
 </script>
 """
@@ -988,11 +1001,12 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<form action='/users/create' method='post' style='display:contents;'>"
             "<div><label>Usuario</label><input name='username' required></div>"
             "<div><label>Contraseña</label><input type='password' name='password' required></div>"
-            "<div><label>Rol</label><select name='is_admin'><option value='0'>Usuario</option><option value='1'>Admin</option></select></div>"
+            "<div><label>Rol</label><select name='is_admin' id='createUserRole'><option value='0'>Usuario</option><option value='1'>Admin</option></select></div>"
+            "<div><label>Equipo asignado</label><select name='team' id='createUserTeam'><option value=''>Sin asignar</option><option value='PILARES'>PILARES</option><option value='MADAM'>MADAM</option><option value='COLS'>COLS</option></select></div>"
             "<div><button type='submit'>Crear usuario</button></div>"
             "</form></div>"
             "<div class='table-wrap'><table>"
-            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
+            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
             f"<tbody>{user_rows}</tbody></table></div>"
             "</div>"
         )
@@ -1040,14 +1054,14 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
 
 @app.post("/users/create")
-def create_user(request: Request, username: str = Form(...), password: str = Form(...), is_admin: str = Form("0")):
+def create_user(request: Request, username: str = Form(...), password: str = Form(...), is_admin: str = Form("0"), team: str = Form("")):
     user = require_user(request)
     if not user or not user["is_admin"]:
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO users (username, password_hash, is_admin) VALUES (%s,%s,%s)", (username.strip(), hash_text(password), is_admin == "1"))
+        cur.execute("INSERT INTO users (username, password_hash, is_admin, team) VALUES (%s,%s,%s,%s)", (username.strip(), hash_text(password), is_admin == "1", team_value))
         conn.commit()
     except Exception:
         conn.rollback()
