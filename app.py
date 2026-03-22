@@ -242,10 +242,10 @@ function filterAllBoard(){
  const round=normalizeText(rd ? rd.value : '');
  const rows=document.querySelectorAll("tr[data-all-board-row='1']");
  rows.forEach((row)=>{
-   const hay=normalizeText(row.dataset.search||'');
-   const rr=normalizeText(row.dataset.round||'');
-   const show=(!text||hay.includes(text))&&(!round||rr===round);
-   row.style.display=show?'':'none';
+   const hay=normalizeText(row.getAttribute('data-search') || '');
+   const rr=normalizeText(row.getAttribute('data-round') || '');
+   const show=(!text || hay.includes(text)) && (!round || rr===round);
+   row.style.display=show ? '' : 'none';
  });
 }
 function clearAllBoardFilters(){
@@ -284,11 +284,16 @@ document.addEventListener('DOMContentLoaded',()=>{
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
  const rd=document.getElementById('liveRound');
+ const abs=document.getElementById('allBoardSearch');
+ const abr=document.getElementById('allBoardRound');
  if(s) s.addEventListener('input',filterRows);
  if(st) st.addEventListener('change',filterRows);
  if(rd) rd.addEventListener('change',filterRows);
+ if(abs) abs.addEventListener('input',filterAllBoard);
+ if(abr) abr.addEventListener('change',filterAllBoard);
  filterRows();
- refreshDraftdayEmptyState();
+ filterAllBoard();
+ if(typeof refreshDraftdayEmptyState === 'function') refreshDraftdayEmptyState();
 });
 </script>
 """
