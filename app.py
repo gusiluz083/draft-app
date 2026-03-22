@@ -510,7 +510,7 @@ def enhanced_risk_level(picks_remaining, round_order, position, position_pressur
 def list_users_data():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, is_admin, created_at FROM users ORDER BY username ASC")
+    cur.execute("SELECT id, username, is_admin, COALESCE(team,''), created_at FROM users ORDER BY username ASC")
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -551,18 +551,21 @@ def login(username: str = Form(...), password: str = Form(...)):
 
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, password_hash FROM users WHERE username=%s", (username,))
+    cur.execute("SELECT id, username, password_hash, is_admin, COALESCE(team,'') FROM users WHERE username=%s", (username,))
     row = cur.fetchone()
     cur.close()
     conn.close()
     if not row:
         return RedirectResponse("/login?error=1", status_code=303)
-    user_id, db_username, password_hash = row
+    user_id, db_username, password_hash, is_admin_flag, user_team = row
     if password_hash != hash_text(password):
         return RedirectResponse("/login?error=1", status_code=303)
 
-    r = RedirectResponse("/select-team", status_code=303)
+    next_path = "/select-team" if is_admin_flag else "/"
+    r = RedirectResponse(next_path, status_code=303)
     r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
+    if (not is_admin_flag) and user_team in TEAMS:
+        r.set_cookie(TEAM_COOKIE, user_team, httponly=True, samesite="lax", max_age=604800)
     return r
 
 
@@ -579,6 +582,8 @@ def select_team_page(request: Request):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
+    if not user.get("is_admin"):
+        return RedirectResponse("/", status_code=303)
     cards = "".join([
         f"<div class='team-card'><img class='team-logo' src='{TEAM_IMAGES.get(team, '')}' alt='{team}'><h2>{team}</h2><div class='muted' style='margin-bottom:12px;'>Entrar al tablero de {team}</div><form action='/select-team' method='post'><input type='hidden' name='team' value='{team}'><button type='submit'>Entrar en {team}</button></form></div>"
         for team in TEAMS
@@ -956,6 +961,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<tr>"
                 f"<td>{html.escape(uname)}</td>"
                 f"<td>{role_text}</td>"
+                f"<td>{html.escape(team_text)}</td>"
                 f"<td>{created_text}</td>"
                 f"<td>"
                 f"<form class='inline-form actions-toolbar' action='/users/role/{uid}' method='post'>"
