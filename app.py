@@ -593,7 +593,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='actions-toolbar'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'></button></div>"
         table_html = (
             f"<form action='/bulk-objective' method='post'>"
             f"{bulk_actions}"
@@ -629,7 +629,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             else:
                 actions += [
                     f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Descartada'><button class='btn-danger action-btn' type='submit'>Descartada</button></form>",
-                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>",
+                    f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Fichada por otro equipo'><button class='btn-secondary action-btn' type='submit'></button></form>",
                 ]
             actions_html = "<div class='actions-toolbar'>" + "".join(actions) + "</div>"
             round_class = f"round-{draft_round}" if draft_round else ""
@@ -640,19 +640,17 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
         save_all = ""
+        
         if tab == "objectives":
             bulk_actions = (
                 "<div class='actions-toolbar' style='margin-bottom:12px;'>"
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
                 "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Añadir a Draft Day</button>"
-                "<button class='btn btn-secondary' type='submit' formaction='/bulk-selected-status' name='status' value='Fichada por otro equipo'>Otro equipo</button>"
-                "<button class='btn btn-danger' type='submit' formaction='/bulk-selected-status' name='status' value='Descartada'>Descartadas</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
-                "<button class='btn btn-warning' type='submit' formaction='/bulk-selected-status' name='status' value='Objetivo'>Añadir a Draft Day</button>"
-                "<button class='btn btn-secondary' type='button' onclick='clearSelectedObjectives()'>Quitar selección</button>"
-                "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear todas las jugadoras seleccionadas de este equipo?')\">Reset preselección</button>"
+                "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear toda la preselección de este equipo?')\">Reset preselección</button>"
                 "</div>"
             )
+
             table_html = f"<form method='post'>{bulk_actions}<table><thead><tr><th><input id='selectAllObjectives' type='checkbox' onclick='toggleSelectAllSelected(this)'></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
         else:
             table_html = f"<table><thead><tr><th></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
@@ -692,7 +690,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
-                f"<button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
+                f"<button class='btn-secondary action-btn' type='submit'></button></form>"
                 f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'>"
                 f"<input type='hidden' name='status' value='Descartada'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
