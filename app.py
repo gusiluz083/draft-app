@@ -877,7 +877,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             + f"<input id='allBoardSearch' name='all_board_q' placeholder='Buscar jugadora...' value='{html.escape(all_board_q)}'>"
             + "<select id='allBoardRound' name='all_board_round'>"
             + "<option value=''>Todas las rondas</option>"
-           .join([f"<option value='{i}' {'selected' if all_board_round == str(i) else ''}>{i}</option>" for i in range(1,11)])
+            + "".join([f"<option value='{i}' {'selected' if all_board_round == str(i) else ''}>{i}</option>" for i in range(1,11)])
             + "</select>"
             + "<button class='btn btn-secondary' type='submit'>Buscar</button>"
             + "<a class='btn btn-light' href='/?tab=draftday&current_round=" + str(current_round) + "'>Limpiar</a>"
@@ -898,7 +898,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
             f"<div class='draftday-actions'>"
             f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
-            f"<a class='btn btn-secondary' href='/?tab=newplayers'></a>"f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
+            f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
             f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
             f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
             f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
@@ -908,7 +908,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<form action='/draftday-state' method='post'>"
             f"<div class='grid'>"
             f"<div><label>Ronda actual</label><select name='current_round'>"
-           .join([f"<option value='{i}' {'selected' if current_round==i else ''}>{i}</option>" for i in range(1,11)])
+            + "".join([f"<option value='{i}' {'selected' if current_round==i else ''}>{i}</option>" for i in range(1,11)])
             + f"</select></div>"
             f"<div><label>Pick actual</label><input name='current_pick' value='{current_pick if current_pick is not None else ''}' placeholder='Ej. 23'></div>"
             f"<div><label>Siguiente pick propio</label><input name='next_pick' value='{next_pick if next_pick is not None else ''}' placeholder='Ej. 31'></div>"
