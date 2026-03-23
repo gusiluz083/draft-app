@@ -442,20 +442,11 @@ def get_team_counts(board_team: str):
     cur = conn.cursor()
     cur.execute(
         '''
-        SELECT
-            CASE
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('portera','portero','gk') THEN 'Portera'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('defensa','def','df','cierre') THEN 'Defensa'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('medio','mediocentro','centrocampista','mc','ala') THEN 'Medio'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('delantera','delantero','dc','pivot','pivote','punta') THEN 'Delantera'
-                ELSE TRIM(COALESCE(p.position,''))
-            END AS pos_norm,
-            COUNT(*)
+        SELECT p.position, COUNT(*)
         FROM team_player_decisions d
         JOIN players p ON p.id = d.player_id
-        WHERE d.board_team=%s
-          AND LOWER(TRIM(COALESCE(d.status,'')))='elegida'
-        GROUP BY pos_norm
+        WHERE d.board_team=%s AND d.status='Elegida'
+        GROUP BY p.position
         ''',
         (board_team,),
     )
@@ -467,7 +458,6 @@ def get_team_counts(board_team: str):
         "Defensa": counts.get("Defensa", 0),
         "Medio": counts.get("Medio", 0),
         "Delantera": counts.get("Delantera", 0),
-        "Total": counts.get("Portera", 0) + counts.get("Defensa", 0) + counts.get("Medio", 0) + counts.get("Delantera", 0),
     }
 
 
@@ -1019,7 +1009,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='stat'><div class='muted'>Defensas</div><div id='dd-count-defensa' class='stat-number'>{team_counts['Defensa']}</div></div>"
             f"<div class='stat'><div class='muted'>Medios</div><div id='dd-count-medio' class='stat-number'>{team_counts['Medio']}</div></div>"
             f"<div class='stat'><div class='muted'>Delanteras</div><div id='dd-count-delantera' class='stat-number'>{team_counts['Delantera']}</div></div>"
-            f"<div class='stat'><div class='muted'>Total</div><div id='dd-count-total' class='stat-number'>{team_counts['Total']}</div></div>"
             f"</div>"
             f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
             f"</div>"
