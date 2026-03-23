@@ -598,7 +598,7 @@ def login_page(request: Request, error: str = ""):
         "<form action='/login' method='post'>"
         "<div style='margin:12px 0;'><label>Usuario</label><input name='username' required></div>"
         "<div style='margin:12px 0;'><label>Contraseña</label><input type='password' name='password' required></div>"
-        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación creada por Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
+        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación desarrollada por Aniol y Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
     )
 
 
@@ -1147,55 +1147,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     wildcard_box = ""
     if tab == "final":
         wildcard_box = f"<div class='card'><h2>Wildcard</h2><form action='/wildcard' method='post'><div class='grid-2'><div><label>Nombre jugadora wildcard</label><input name='name' value='{html.escape(wildcard_name)}' placeholder='Escribe el nombre'></div><div style='display:flex;align-items:end;'><button type='submit'>Guardar wildcard</button></div></div></form><div class='note-box' style='margin-top:12px;'><strong>Wildcard actual:</strong> {html.escape(wildcard_name or 'Sin definir')}</div></div>"
-
-    if tab == "newplayers":
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'') FROM new_players ORDER BY id DESC, name ASC"
-        )
-        new_rows = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        rows_html = ""
-        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in new_rows:
-            search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
-            actions = "".join([
-                f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
-                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
-                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
-            ])
-            rows_html += (
-                f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'>"
-                f"<td>{html.escape(dorsal)}</td>"
-                f"<td>{html.escape(name)}</td>"
-                f"<td>{html.escape(position)}</td>"
-                f"<td>{html.escape(estimated_level)}</td>"
-                f"<td>{html.escape(fit_level)}</td>"
-                f"<td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status)}</span></td>"
-                f"<td>{html.escape(notes)}</td>"
-                f"<td><div class='draftday-actions'>{actions}</div></td>"
-                f"</tr>"
-            )
-        if not rows_html:
-            rows_html = "<tr><td colspan='8' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
-
-        content = (
-            f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
-            f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
-            f"{admin_box}"
-            f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
-            f"{add_box}"
-            f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
-            f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, dorsal, posición, notas'></div>"
-            f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Seguimiento'>Seguimiento</option><option value='Top'>Top</option><option value='Interesante'>Interesante</option><option value='Descartada'>Descartada</option></select></div>"
-            f"<div><label>Ronda</label><select id='liveRound'><option value=''>Todas</option></select></div></div></div>"
-            f"<div class='card'><div class='topbar'><div><h2>Jugadoras nuevas creadas</h2><div class='muted'>Listado de scouting de jugadoras nuevas</div></div></div>"
-            f"<div class='table-wrap'><table><thead><tr><th>#</th><th>Nombre</th><th>Posición</th><th>Nivel</th><th>Encaje</th><th>Estado</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows_html}</tbody></table></div></div>"
-        )
-        return page(content)
 
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
