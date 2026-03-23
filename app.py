@@ -242,84 +242,6 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 .stat-number { font-size:28px; font-weight:bold; margin-top:4px; }
 .note-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px; }
 @media (max-width:900px) { .grid,.grid-2,.grid-3,.team-cards,.stats { grid-template-columns:1fr; } }
-
-/* ===== MENÚS MÁS PROFESIONALES ===== */
-.tabs {
-    display:flex;
-    gap:12px;
-    flex-wrap:wrap;
-    margin-bottom:20px;
-    padding:10px 12px;
-    background:rgba(255,255,255,0.72);
-    border:1px solid #dbe3ef;
-    border-radius:16px;
-    box-shadow:0 8px 24px rgba(15,23,42,0.06);
-}
-.tab {
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    min-height:40px;
-    padding:10px 16px;
-    border-radius:999px;
-    background:#e2e8f0;
-    color:#0f172a;
-    text-decoration:none;
-    font-weight:700;
-    transition:all .18s ease;
-}
-.tab:hover {
-    background:#cbd5e1;
-    transform:translateY(-1px);
-}
-.tab.active {
-    background:#2563eb;
-    color:white;
-    box-shadow:0 8px 18px rgba(37,99,235,0.28);
-}
-
-.topbar {
-    display:flex;
-    justify-content:space-between;
-    gap:14px;
-    flex-wrap:wrap;
-    align-items:flex-start;
-    margin-bottom:8px;
-}
-.topbar .draftday-actions {
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px;
-    align-items:center;
-    justify-content:flex-end;
-    padding:10px 12px;
-    background:rgba(255,255,255,0.72);
-    border:1px solid #dbe3ef;
-    border-radius:16px;
-    box-shadow:0 8px 24px rgba(15,23,42,0.06);
-}
-.topbar .draftday-actions a.btn {
-    min-height:40px;
-    padding:10px 16px;
-    border-radius:999px;
-    font-weight:700;
-    letter-spacing:.01em;
-    box-shadow:none;
-    transition:transform .18s ease, box-shadow .18s ease, opacity .18s ease;
-}
-.topbar .draftday-actions a.btn:hover {
-    transform:translateY(-1px);
-    box-shadow:0 8px 18px rgba(15,23,42,0.14);
-}
-.topbar .draftday-actions .btn-dark {
-    box-shadow:0 8px 18px rgba(15,23,42,0.24);
-}
-
-@media (max-width: 900px) {
-    .topbar { align-items:stretch; }
-    .topbar .draftday-actions { justify-content:flex-start; }
-}
-
 </style>
 """
 
@@ -789,6 +711,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "database":
         allowed_sort = ["id", "name", "team", "position", "status"]
+    elif tab == "newplayers":
+        allowed_sort = ["id", "name", "position", "status"]
     else:
         allowed_sort = ["id", "name", "team", "position", "decision_status", "draft_round"]
     if sort not in allowed_sort:
@@ -803,6 +727,20 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             SELECT id, name, team, position, status, COALESCE(notes,'')
             FROM players
             ORDER BY {sort} {order_sql}
+        """
+        cur.execute(sql)
+        players = cur.fetchall()
+    elif tab == "newplayers":
+        sort_expr = {
+            "id": "id",
+            "name": "name",
+            "position": "position",
+            "status": "scout_status",
+        }.get(sort, "id")
+        sql = f"""
+            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
+            FROM new_players
+            ORDER BY {sort_expr} {order_sql}, id DESC
         """
         cur.execute(sql)
         players = cur.fetchall()
@@ -872,6 +810,19 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</tr></thead><tbody>{rows}</tbody></table>"
             f"{bulk_actions}</form>"
         )
+    elif tab == "newplayers":
+        rows = ""
+        for pid, dorsal, name, position, club, scout_status, notes in players:
+            search_blob = " ".join([dorsal or "", name or "", club or "", position or "", scout_status or "", notes or ""])
+            actions = "".join([
+                f"<a class='btn btn-light action-btn' href='/new-player/{pid}'>Editar</a>",
+                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
+                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+            ])
+            rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td></td><td>{html.escape(name or '')}</td><td>{html.escape(club or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status)}</span></td><td></td><td></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
+        if not rows:
+            rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas.</td></tr>"
+        table_html = f"<table><thead><tr><th></th><th>{head('name','Nombre')}</th><th>Equipo actual</th><th>{head('position','Posición')}</th><th>{head('status','Estado')}</th><th>Ronda</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
     else:
         position_pressure = {}
         for _pid, _name, _team, _position, _player_status, _notes, _decision_status, _draft_round, _round_order in players:
@@ -1251,7 +1202,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
         f"{"<div><label>Ronda</label><select id='liveRound'><option value=''>Todas</option>" + ''.join([f"<option value='{i}'>{i}</option>" for i in range(1,11)]) + "</select></div>" if tab == 'objectives' else "<div><label>Ronda</label><select id='liveRound' disabled><option value=''>No aplica</option></select></div>"}"
         f"</div><div style='margin-top:12px;'><button type='button' class='btn btn-secondary' onclick='clearFilters()'>Limpiar</button></div><div class='muted' style='margin-top:10px;'>Mostrando <strong id='visibleCount'>0</strong> jugadoras</div></div>"
-        f"<div class='card'><h2>{'Jugadoras' if tab=='database' else 'Jugadoras preseleccionadas de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
+        f"<div class='card'><h2>{'Jugadoras' if tab=='database' else 'Jugadoras nuevas' if tab=='newplayers' else 'Jugadoras preseleccionadas de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
     )
     return page(content)
 
