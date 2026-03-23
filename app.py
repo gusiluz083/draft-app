@@ -349,10 +349,28 @@ def require_user(request: Request):
     return get_current_user(request)
 
 
+def user_allowed_teams(user: dict) -> list[str]:
+    if not user:
+        return []
+    if user.get("is_admin"):
+        return TEAMS[:]
+    raw = (user.get("team") or "").strip()
+    if raw == "__ALL__":
+        return TEAMS[:]
+    if not raw:
+        return []
+    parts = [p.strip() for p in raw.split(",") if p.strip() in TEAMS]
+    return parts
+
+
 def get_team(request: Request):
     user = get_current_user(request)
-    if user and (not user.get("is_admin")) and user.get("team") in TEAMS:
-        return user.get("team")
+    if user and (not user.get("is_admin")):
+        allowed = user_allowed_teams(user)
+        if len(allowed) == 1:
+            return allowed[0]
+        team = request.cookies.get(TEAM_COOKIE, "")
+        return team if team in allowed else (allowed[0] if allowed else None)
     team = request.cookies.get(TEAM_COOKIE, "")
     return team if team in TEAMS else None
 
@@ -586,11 +604,12 @@ def login(username: str = Form(...), password: str = Form(...)):
     if password_hash != hash_text(password):
         return RedirectResponse("/login?error=1", status_code=303)
 
-    next_path = "/select-team" if is_admin_flag else "/"
+    allowed_teams = TEAMS[:] if is_admin_flag else (TEAMS[:] if user_team == "__ALL__" else [t.strip() for t in user_team.split(",") if t.strip() in TEAMS])
+    next_path = "/select-team" if (is_admin_flag or len(allowed_teams) > 1) else "/"
     r = RedirectResponse(next_path, status_code=303)
     r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
-    if (not is_admin_flag) and user_team in TEAMS:
-        r.set_cookie(TEAM_COOKIE, user_team, httponly=True, samesite="lax", max_age=604800)
+    if (not is_admin_flag) and len(allowed_teams) == 1:
+        r.set_cookie(TEAM_COOKIE, allowed_teams[0], httponly=True, samesite="lax", max_age=604800)
     return r
 
 
@@ -607,14 +626,22 @@ def select_team_page(request: Request):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    if not user.get("is_admin"):
+
+    allowed = TEAMS[:] if user.get("is_admin") else user_allowed_teams(user)
+    if len(allowed) == 1:
+        r = RedirectResponse("/", status_code=303)
+        r.set_cookie(TEAM_COOKIE, allowed[0], httponly=True, samesite="lax", max_age=604800)
+        return r
+    if not allowed:
         return RedirectResponse("/", status_code=303)
+
     cards = "".join([
         f"<div class='team-card'><img class='team-logo' src='{TEAM_IMAGES.get(team, '')}' alt='{team}'><h2>{team}</h2><div class='muted' style='margin-bottom:12px;'>Entrar al tablero de {team}</div><form action='/select-team' method='post'><input type='hidden' name='team' value='{team}'><button type='submit'>Entrar en {team}</button></form></div>"
-        for team in TEAMS
+        for team in allowed
     ])
+    title = "Elegir equipo"
     return page(
-        f"<div class='card'><div class='topbar'><div><h1>Elegir equipo</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div><a class='btn btn-secondary' href='/logout'>Salir</a></div><div class='team-cards' style='margin-top:18px;'>{cards}</div></div>"
+        f"<div class='card'><div class='topbar'><div><h1>{title}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div><a class='btn btn-secondary' href='/logout'>Salir</a></div><div class='team-cards' style='margin-top:18px;'>{cards}</div></div>"
     )
 
 
@@ -623,9 +650,8 @@ def select_team(request: Request, team: str = Form(...)):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
-    if not user.get("is_admin"):
-        return RedirectResponse("/", status_code=303)
-    if team not in TEAMS:
+    allowed = TEAMS[:] if user.get("is_admin") else user_allowed_teams(user)
+    if team not in allowed:
         return RedirectResponse("/select-team", status_code=303)
     r = RedirectResponse("/", status_code=303)
     r.set_cookie(TEAM_COOKIE, team, httponly=True, samesite="lax", max_age=604800)
@@ -964,14 +990,17 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     admin_box = ""
     team_lock_notice = ""
-    if (not user["is_admin"]) and user.get("team") in TEAMS:
-        team_lock_notice = f"<div class='card'><strong>Equipo asignado:</strong> {html.escape(user.get('team'))}. Este usuario solo puede acceder a ese equipo.</div>"
+    if (not user["is_admin"]):
+        allowed_teams = user_allowed_teams(user)
+        if allowed_teams:
+            allowed_text = ", ".join(allowed_teams)
+            team_lock_notice = f"<div class='card'><strong>Equipos asignados:</strong> {html.escape(allowed_text)}.</div>"
     if user["is_admin"]:
         user_rows = ""
         for uid, uname, is_admin_flag, team_value, created_at in list_users_data():
             created_text = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
             role_text = "Admin" if is_admin_flag else "Usuario"
-            team_text = "Todos" if is_admin_flag else (team_value or "Sin equipo")
+            team_text = "Todos" if is_admin_flag else ("Todos los equipos" if team_value == "__ALL__" else (team_value or "Sin equipo"))
             role_options = (
                 f"<option value='0' {'selected' if not is_admin_flag else ''}>Usuario</option>"
                 f"<option value='1' {'selected' if is_admin_flag else ''}>Admin</option>"
@@ -985,6 +1014,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
             team_options = (
                 f"<option value='' {'selected' if not team_value else ''}>Sin equipo</option>"
+                f"<option value='__ALL__' {'selected' if team_value == '__ALL__' else ''}>Todos los equipos</option>"
                 + "".join([f"<option value='{t}' {'selected' if team_value == t else ''}>{t}</option>" for t in TEAMS])
             )
             team_manage = (
@@ -1027,7 +1057,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div><label>Usuario</label><input name='username' required></div>"
             "<div><label>Contraseña</label><input type='password' name='password' required></div>"
             "<div><label>Rol</label><select name='is_admin' id='createUserRole'><option value='0'>Usuario</option><option value='1'>Admin</option></select></div>"
-            "<div><label>Equipo asignado</label><select name='team' id='createUserTeam'><option value=''>Sin equipo</option><option value='PILARES'>PILARES</option><option value='MADAM'>MADAM</option><option value='COLS'>COLS</option></select></div>"
+            "<div><label>Equipo asignado</label><select name='team' id='createUserTeam'><option value=''>Sin equipo</option><option value='__ALL__'>Todos los equipos</option><option value='PILARES'>PILARES</option><option value='MADAM'>MADAM</option><option value='COLS'>COLS</option></select></div>"
             "<div><button type='submit'>Crear usuario</button></div>"
             "</form></div>"
             "<div class='table-wrap'><table>"
@@ -1084,7 +1114,7 @@ def create_user(request: Request, username: str = Form(...), password: str = For
     if not user or not user["is_admin"]:
         return RedirectResponse("/login", status_code=303)
 
-    team_value = "" if is_admin == "1" else (team if team in TEAMS else "")
+    team_value = "" if is_admin == "1" else ("__ALL__" if team == "__ALL__" else (team if team in TEAMS else ""))
 
     conn = get_conn()
     cur = conn.cursor()
@@ -1132,7 +1162,7 @@ def update_user_team(user_id: int, request: Request, team: str = Form("")):
     if not user or not user["is_admin"]:
         return RedirectResponse("/login", status_code=303)
 
-    team_value = team if team in TEAMS else ""
+    team_value = "__ALL__" if team == "__ALL__" else (team if team in TEAMS else "")
     conn = get_conn()
     cur = conn.cursor()
     try:
