@@ -207,10 +207,13 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .team-card { border:1px solid #dbe3ef; border-radius:16px; padding:18px; background:#f8fbff; text-align:center; transition:transform .15s ease, box-shadow .15s ease; }
 .team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,23,42,0.10); }
 .team-logo { width: 160px; height: 160px; object-fit: contain; display:block; margin: 0 auto 14px; border-radius: 16px; background: white; padding: 8px; border: 1px solid #e5e7eb; }
-.tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
-.tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
-.tab.active { background:#2563eb; color:white; }
+.tabs { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px; align-items:center; }
+.tab { padding:12px 18px; border-radius:14px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; border:1px solid #d7e0ea; box-shadow:0 2px 8px rgba(15,23,42,0.05); transition:all .15s ease; }
+.tab:hover { transform:translateY(-1px); box-shadow:0 8px 18px rgba(15,23,42,0.08); }
+.tab.active { background:#2563eb; color:white; border-color:#2563eb; }
 .topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
+.draftday-actions { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+.draftday-actions .btn { padding:11px 16px; border-radius:14px; box-shadow:0 2px 8px rgba(15,23,42,0.06); }
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -1195,7 +1198,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
-            f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
+            f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
             f"{add_box}"
             f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
             f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, dorsal, posición, notas'></div>"
@@ -1214,7 +1217,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
-        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
+        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
         f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
