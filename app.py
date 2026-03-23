@@ -176,42 +176,6 @@ def init_db():
         )
         """
     )
-
-    # Migración segura para bases de datos antiguas
-    migration_columns = [
-        ("age", "TEXT"),
-        ("club", "TEXT"),
-        ("dominant_foot", "TEXT"),
-        ("estimated_level", "TEXT"),
-        ("fit_level", "TEXT"),
-        ("priority_level", "TEXT"),
-        ("control_skill", "TEXT"),
-        ("passing_skill", "TEXT"),
-        ("dribbling_skill", "TEXT"),
-        ("shooting_skill", "TEXT"),
-        ("speed_skill", "TEXT"),
-        ("stamina_skill", "TEXT"),
-        ("power_skill", "TEXT"),
-        ("positioning_skill", "TEXT"),
-        ("tactical_iq", "TEXT"),
-        ("versatility_skill", "TEXT"),
-        ("leadership_skill", "TEXT"),
-        ("character_skill", "TEXT"),
-        ("exp_f7", "TEXT"),
-        ("exp_f11", "TEXT"),
-        ("exp_kq", "TEXT"),
-        ("photo_url", "TEXT"),
-        ("video1_url", "TEXT"),
-        ("video2_url", "TEXT"),
-        ("video3_url", "TEXT"),
-        ("scout_status", "TEXT DEFAULT 'Seguimiento'"),
-        ("notes", "TEXT DEFAULT ''"),
-        ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
-    ]
-
-    for col_name, col_type in migration_columns:
-        cur.execute(f"ALTER TABLE new_players ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
-
     conn.commit()
     cur.close()
     conn.close()
