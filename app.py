@@ -58,6 +58,8 @@ def get_conn():
 def ensure_admin():
     conn = get_conn()
     cur = conn.cursor()
+    ensure_new_players_schema(cur)
+    conn.commit()
     cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USER,))
     row = cur.fetchone()
     if row:
@@ -74,6 +76,83 @@ def ensure_admin():
     cur.close()
     conn.close()
 
+
+
+def ensure_new_players_schema(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS new_players (
+            id SERIAL PRIMARY KEY,
+            dorsal TEXT,
+            name TEXT NOT NULL,
+            position TEXT,
+            age TEXT,
+            club TEXT,
+            dominant_foot TEXT,
+            estimated_level TEXT,
+            fit_level TEXT,
+            priority_level TEXT,
+            control_skill TEXT,
+            passing_skill TEXT,
+            dribbling_skill TEXT,
+            shooting_skill TEXT,
+            speed_skill TEXT,
+            stamina_skill TEXT,
+            power_skill TEXT,
+            positioning_skill TEXT,
+            tactical_iq TEXT,
+            versatility_skill TEXT,
+            leadership_skill TEXT,
+            character_skill TEXT,
+            exp_f7 TEXT,
+            exp_f11 TEXT,
+            exp_kq TEXT,
+            photo_url TEXT,
+            video1_url TEXT,
+            video2_url TEXT,
+            video3_url TEXT,
+            scout_status TEXT DEFAULT 'Seguimiento',
+            notes TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    migration_columns = [
+        ("dorsal", "TEXT"),
+        ("position", "TEXT"),
+        ("age", "TEXT"),
+        ("club", "TEXT"),
+        ("dominant_foot", "TEXT"),
+        ("estimated_level", "TEXT"),
+        ("fit_level", "TEXT"),
+        ("priority_level", "TEXT"),
+        ("control_skill", "TEXT"),
+        ("passing_skill", "TEXT"),
+        ("dribbling_skill", "TEXT"),
+        ("shooting_skill", "TEXT"),
+        ("speed_skill", "TEXT"),
+        ("stamina_skill", "TEXT"),
+        ("power_skill", "TEXT"),
+        ("positioning_skill", "TEXT"),
+        ("tactical_iq", "TEXT"),
+        ("versatility_skill", "TEXT"),
+        ("leadership_skill", "TEXT"),
+        ("character_skill", "TEXT"),
+        ("exp_f7", "TEXT"),
+        ("exp_f11", "TEXT"),
+        ("exp_kq", "TEXT"),
+        ("photo_url", "TEXT"),
+        ("video1_url", "TEXT"),
+        ("video2_url", "TEXT"),
+        ("video3_url", "TEXT"),
+        ("scout_status", "TEXT DEFAULT 'Seguimiento'"),
+        ("notes", "TEXT DEFAULT ''"),
+        ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+    ]
+
+    for col_name, col_type in migration_columns:
+        cur.execute(f"ALTER TABLE new_players ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
 
 def init_db():
     conn = get_conn()
@@ -138,44 +217,7 @@ def init_db():
         )
         """
     )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS new_players (
-            id SERIAL PRIMARY KEY,
-            dorsal TEXT,
-            name TEXT NOT NULL,
-            position TEXT,
-            age TEXT,
-            club TEXT,
-            dominant_foot TEXT,
-            estimated_level TEXT,
-            fit_level TEXT,
-            priority_level TEXT,
-            control_skill TEXT,
-            passing_skill TEXT,
-            dribbling_skill TEXT,
-            shooting_skill TEXT,
-            speed_skill TEXT,
-            stamina_skill TEXT,
-            power_skill TEXT,
-            positioning_skill TEXT,
-            tactical_iq TEXT,
-            versatility_skill TEXT,
-            leadership_skill TEXT,
-            character_skill TEXT,
-            exp_f7 TEXT,
-            exp_f11 TEXT,
-            exp_kq TEXT,
-            photo_url TEXT,
-            video1_url TEXT,
-            video2_url TEXT,
-            video3_url TEXT,
-            scout_status TEXT DEFAULT 'Seguimiento',
-            notes TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
+    ensure_new_players_schema(cur)
     conn.commit()
     cur.close()
     conn.close()
@@ -725,8 +767,15 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             FROM new_players
             ORDER BY id DESC, name ASC
         """
-        cur.execute(sql)
-        players = cur.fetchall()
+        try:
+            cur.execute(sql)
+            players = cur.fetchall()
+        except Exception:
+            conn.rollback()
+            ensure_new_players_schema(cur)
+            conn.commit()
+            cur.execute(sql)
+            players = cur.fetchall()
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
