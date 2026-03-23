@@ -725,8 +725,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             FROM new_players
             ORDER BY id DESC, name ASC
         """
-        cur.execute(sql)
-        players = cur.fetchall()
+        try:
+            cur.execute(sql)
+            players = cur.fetchall()
+        except Exception:
+            players = []
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
