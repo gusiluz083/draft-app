@@ -138,6 +138,44 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS new_players (
+            id SERIAL PRIMARY KEY,
+            dorsal TEXT,
+            name TEXT NOT NULL,
+            position TEXT,
+            age TEXT,
+            club TEXT,
+            dominant_foot TEXT,
+            estimated_level TEXT,
+            fit_level TEXT,
+            priority_level TEXT,
+            control_skill TEXT,
+            passing_skill TEXT,
+            dribbling_skill TEXT,
+            shooting_skill TEXT,
+            speed_skill TEXT,
+            stamina_skill TEXT,
+            power_skill TEXT,
+            positioning_skill TEXT,
+            tactical_iq TEXT,
+            versatility_skill TEXT,
+            leadership_skill TEXT,
+            character_skill TEXT,
+            exp_f7 TEXT,
+            exp_f11 TEXT,
+            exp_kq TEXT,
+            photo_url TEXT,
+            video1_url TEXT,
+            video2_url TEXT,
+            video3_url TEXT,
+            scout_status TEXT DEFAULT 'Seguimiento',
+            notes TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     conn.commit()
     cur.close()
     conn.close()
@@ -682,6 +720,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
+        all_board_q = (request.query_params.get("all_board_q", "") or "").strip()
+        all_board_round = (request.query_params.get("all_board_round", "") or "").strip()
         sql = """
             SELECT p.id, p.name, p.team, p.position, p.status, COALESCE(p.notes,''), d.status, d.draft_round, d.round_order
             FROM team_player_decisions d
@@ -847,7 +887,13 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for apid, aname, ateam, aposition, anotes, astatus, adraft_round, around_order in get_all_objectives(board_team):
             apos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(aposition, (aposition or "")[:3].upper())
             around_text = str(adraft_round or "")
-            asearch = " ".join([aname or "", ateam or "", aposition or "", anotes or "", around_text])
+            asearch = " ".join([aname or "", ateam or "", aposition or "", anotes or "", around_text]).lower()
+
+            if all_board_q and all_board_q.lower() not in asearch:
+                continue
+            if all_board_round and all_board_round != around_text:
+                continue
+
             all_objectives_rows += (
                 f"<tr data-all-board-row='1' data-round='{html.escape(around_text)}' data-search='{html.escape(asearch)}'>"
                 f"<td>{html.escape(aname or '')}</td>"
@@ -891,14 +937,17 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
         all_board_html = (
-            "<div class='allboard-toolbar'>"
-            "<input id='allBoardSearch' placeholder='Buscar jugadora...' oninput='filterAllBoard()'>"
-            "<select id='allBoardRound' onchange='filterAllBoard()'>"
-            "<option value=''>Todas las rondas</option>"
-            + "".join([f"<option value='{i}'>{i}</option>" for i in range(1,11)])
+            "<form class='allboard-toolbar' method='get' action='/'>"
+            "<input type='hidden' name='tab' value='draftday'>"
+            + f"<input type='hidden' name='current_round' value='{current_round}'>"
+            + f"<input id='allBoardSearch' name='all_board_q' placeholder='Buscar jugadora...' value='{html.escape(all_board_q)}'>"
+            + "<select id='allBoardRound' name='all_board_round'>"
+            + "<option value=''>Todas las rondas</option>"
+            + "".join([f"<option value='{i}' {'selected' if all_board_round == str(i) else ''}>{i}</option>" for i in range(1,11)])
             + "</select>"
-            "<button class='btn btn-light' type='button' onclick='clearAllBoardFilters()'>Limpiar</button>"
-            "</div>"
+            + "<button class='btn btn-secondary' type='submit'>Buscar</button>"
+            + "<a class='btn btn-light' href='/?tab=draftday&current_round=" + str(current_round) + "'>Limpiar</a>"
+            + "</form>"
             + f"<table class='draftday-table allboard-table'><thead><tr><th>Jugadora</th><th>R</th><th>Ord</th><th>Pos</th><th>Acción</th></tr></thead><tbody>{all_objectives_rows}</tbody></table>"
         )
         blocked_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Ord</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
@@ -915,7 +964,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
             f"<div class='draftday-actions'>"
             f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
-            f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
+            f"<a class='btn btn-secondary' href='/?tab=newplayers'>Jugadoras nuevas</a>"f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
             f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
             f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
             f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
@@ -1077,6 +1126,24 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div class='card'><h2>Importar CSV</h2><form action='/import' method='post' enctype='multipart/form-data'><label>Archivo CSV</label><input type='file' name='file' accept='.csv' required><div style='margin-top:12px;'><button type='submit'>Importar CSV</button></div></form><div class='muted' style='margin-top:10px;'>La base de datos es común para PILARES, MADAM y COLS.</div></div></div>"
         )
 
+    if tab == "newplayers":
+        add_box = (
+            "<div class='card'><h2>Jugadoras nuevas</h2>"
+            "<form action='/new-player/add' method='post'>"
+            "<div class='grid'>"
+            "<div><label>Dorsal</label><input name='dorsal'></div>"
+            "<div><label>Nombre y apellidos</label><input name='name' required></div>"
+            "<div><label>Posición</label><select name='position'><option value='Portera'>Portera</option><option value='Defensa'>Defensa</option><option value='Medio'>Medio</option><option value='Delantera'>Delantera</option></select></div>"
+            "<div><label>Club / Procedencia</label><input name='club'></div>"
+            "<div><label>Nivel estimado</label><select name='estimated_level'><option value=''>-</option><option>Top</option><option>Muy interesante</option><option>Interesante</option><option>Seguimiento</option><option>Descartable</option></select></div>"
+            "<div><label>Encaje</label><select name='fit_level'><option value=''>-</option><option>Encaja mucho</option><option>Encaja</option><option>Duda</option><option>No encaja</option></select></div>"
+            "<div><label>Estado</label><select name='scout_status'><option>Seguimiento</option><option>Top</option><option>Interesante</option><option>Descartada</option></select></div>"
+            "</div>"
+            "<div style='margin-top:12px;'><label>Observaciones</label><textarea name='notes'></textarea></div>"
+            "<div style='margin-top:16px;'><button type='submit'>Añadir jugadora nueva</button></div>"
+            "</form></div>"
+        )
+
     wildcard_box = ""
     if tab == "final":
         wildcard_box = f"<div class='card'><h2>Wildcard</h2><form action='/wildcard' method='post'><div class='grid-2'><div><label>Nombre jugadora wildcard</label><input name='name' value='{html.escape(wildcard_name)}' placeholder='Escribe el nombre'></div><div style='display:flex;align-items:end;'><button type='submit'>Guardar wildcard</button></div></div></form><div class='note-box' style='margin-top:12px;'><strong>Wildcard actual:</strong> {html.escape(wildcard_name or 'Sin definir')}</div></div>"
@@ -1086,7 +1153,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
-        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
+        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
         f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
@@ -1824,3 +1891,155 @@ def ensure_admin():
     conn.commit()
     cur.close()
     conn.close()
+
+
+@app.post("/new-player/add")
+def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), club: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return RedirectResponse("/?tab=newplayers", status_code=303)
+
+
+@app.get("/new-player/{player_id}", response_class=HTMLResponse)
+def new_player_page(player_id: int, request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(age,''), COALESCE(club,''), COALESCE(dominant_foot,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(priority_level,''), COALESCE(control_skill,''), COALESCE(passing_skill,''), COALESCE(dribbling_skill,''), COALESCE(shooting_skill,''), COALESCE(speed_skill,''), COALESCE(stamina_skill,''), COALESCE(power_skill,''), COALESCE(positioning_skill,''), COALESCE(tactical_iq,''), COALESCE(versatility_skill,''), COALESCE(leadership_skill,''), COALESCE(character_skill,''), COALESCE(exp_f7,''), COALESCE(exp_f11,''), COALESCE(exp_kq,''), COALESCE(photo_url,''), COALESCE(video1_url,''), COALESCE(video2_url,''), COALESCE(video3_url,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return page("<div class='card'><h2>Jugadora nueva no encontrada</h2><a class='btn' href='/?tab=newplayers'>Volver</a></div>")
+    pid, dorsal, name, position, age, club, dominant_foot, estimated_level, fit_level, priority_level, control_skill, passing_skill, dribbling_skill, shooting_skill, speed_skill, stamina_skill, power_skill, positioning_skill, tactical_iq, versatility_skill, leadership_skill, character_skill, exp_f7, exp_f11, exp_kq, photo_url, video1_url, video2_url, video3_url, scout_status, notes = row
+
+    def sel(current, values):
+        return "".join([f"<option value='{html.escape(v)}' {'selected' if current == v else ''}>{html.escape(v)}</option>" for v in values])
+
+    lvl_opts = ["", "Top", "Muy interesante", "Interesante", "Seguimiento", "Descartable"]
+    fit_opts = ["", "Encaja mucho", "Encaja", "Duda", "No encaja"]
+    rate_opts = ["", "Alta", "Media", "Baja"]
+    exp_opts = ["", "Alta", "Media", "Baja", "Nula"]
+    status_opts = ["Seguimiento", "Top", "Interesante", "Descartada"]
+
+    photo_preview = f"<div style='margin-top:12px;'><img src='{html.escape(photo_url)}' style='max-width:220px;border-radius:12px;border:1px solid #e5e7eb;'></div>" if photo_url else ""
+
+    content = (
+        f"<div class='topbar'><div><h1>Ficha · {html.escape(name)}</h1><div class='muted'>Jugadora nueva · dorsal {html.escape(dorsal or '-')}</div></div>"
+        f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/?tab=newplayers'>Volver</a><form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn btn-warning' type='submit'>Añadir a preselección</button></form></div></div>"
+        f"<form action='/new-player/{pid}' method='post'>"
+        f"<div class='grid-2'><div>"
+        f"<div class='card'><h2>Datos básicos</h2><div class='grid'>"
+        f"<div><label>Dorsal</label><input name='dorsal' value='{html.escape(dorsal)}'></div>"
+        f"<div><label>Nombre</label><input name='name' value='{html.escape(name)}' required></div>"
+        f"<div><label>Posición</label><select name='position'>{sel(position, ['Portera','Defensa','Medio','Delantera'])}</select></div>"
+        f"<div><label>Edad</label><input name='age' value='{html.escape(age)}'></div>"
+        f"<div><label>Club / Procedencia</label><input name='club' value='{html.escape(club)}'></div>"
+        f"<div><label>Pierna dominante</label><input name='dominant_foot' value='{html.escape(dominant_foot)}'></div>"
+        f"<div><label>Nivel estimado</label><select name='estimated_level'>{sel(estimated_level, lvl_opts)}</select></div>"
+        f"<div><label>Encaje</label><select name='fit_level'>{sel(fit_level, fit_opts)}</select></div>"
+        f"<div><label>Prioridad</label><select name='priority_level'>{sel(priority_level, ['', 'Muy alta','Alta','Media','Baja'])}</select></div>"
+        f"<div><label>Estado scout</label><select name='scout_status'>{sel(scout_status, status_opts)}</select></div>"
+        f"</div></div>"
+        f"<div class='card'><h2>Evaluación técnica</h2><div class='grid'>"
+        f"<div><label>Control</label><select name='control_skill'>{sel(control_skill, rate_opts)}</select></div>"
+        f"<div><label>Pase</label><select name='passing_skill'>{sel(passing_skill, rate_opts)}</select></div>"
+        f"<div><label>Regate</label><select name='dribbling_skill'>{sel(dribbling_skill, rate_opts)}</select></div>"
+        f"<div><label>Disparo</label><select name='shooting_skill'>{sel(shooting_skill, rate_opts)}</select></div>"
+        f"<div><label>Velocidad</label><select name='speed_skill'>{sel(speed_skill, rate_opts)}</select></div>"
+        f"<div><label>Resistencia</label><select name='stamina_skill'>{sel(stamina_skill, rate_opts)}</select></div>"
+        f"<div><label>Potencia</label><select name='power_skill'>{sel(power_skill, rate_opts)}</select></div>"
+        f"</div></div>"
+        f"<div class='card'><h2>Evaluación táctica y competitiva</h2><div class='grid'>"
+        f"<div><label>Posicionamiento</label><select name='positioning_skill'>{sel(positioning_skill, rate_opts)}</select></div>"
+        f"<div><label>Inteligencia táctica</label><select name='tactical_iq'>{sel(tactical_iq, rate_opts)}</select></div>"
+        f"<div><label>Versatilidad</label><select name='versatility_skill'>{sel(versatility_skill, rate_opts)}</select></div>"
+        f"<div><label>Liderazgo</label><select name='leadership_skill'>{sel(leadership_skill, rate_opts)}</select></div>"
+        f"<div><label>Carácter</label><select name='character_skill'>{sel(character_skill, rate_opts)}</select></div>"
+        f"<div><label>Exp. F7</label><select name='exp_f7'>{sel(exp_f7, exp_opts)}</select></div>"
+        f"<div><label>Exp. F11</label><select name='exp_f11'>{sel(exp_f11, exp_opts)}</select></div>"
+        f"<div><label>Exp. Kings/Queens</label><select name='exp_kq'>{sel(exp_kq, exp_opts)}</select></div>"
+        f"</div></div>"
+        f"<div class='card'><h2>Observaciones</h2><textarea name='notes'>{html.escape(notes)}</textarea></div>"
+        f"</div><div>"
+        f"<div class='card'><h2>Media scouting</h2><label>Foto principal (URL)</label><input name='photo_url' value='{html.escape(photo_url)}'>{photo_preview}"
+        f"<div class='grid' style='margin-top:12px;'><div><label>Vídeo 1</label><input name='video1_url' value='{html.escape(video1_url)}'></div><div><label>Vídeo 2</label><input name='video2_url' value='{html.escape(video2_url)}'></div><div><label>Vídeo 3</label><input name='video3_url' value='{html.escape(video3_url)}'></div></div>"
+        f"<div class='actions-toolbar' style='margin-top:12px;'>"
+        + (f"<a class='btn btn-secondary' href='{html.escape(video1_url)}' target='_blank'>Abrir vídeo 1</a>" if video1_url else "")
+        + (f"<a class='btn btn-secondary' href='{html.escape(video2_url)}' target='_blank'>Abrir vídeo 2</a>" if video2_url else "")
+        + (f"<a class='btn btn-secondary' href='{html.escape(video3_url)}' target='_blank'>Abrir vídeo 3</a>" if video3_url else "")
+        + f"</div></div></div></div>"
+        f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar ficha</button><a class='btn btn-secondary' href='/?tab=newplayers'>Cancelar</a></div>"
+        f"</form>"
+    )
+    return page(content)
+
+
+@app.post("/new-player/{player_id}")
+def save_new_player(player_id: int, request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), age: str = Form(""), club: str = Form(""), dominant_foot: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), priority_level: str = Form(""), control_skill: str = Form(""), passing_skill: str = Form(""), dribbling_skill: str = Form(""), shooting_skill: str = Form(""), speed_skill: str = Form(""), stamina_skill: str = Form(""), power_skill: str = Form(""), positioning_skill: str = Form(""), tactical_iq: str = Form(""), versatility_skill: str = Form(""), leadership_skill: str = Form(""), character_skill: str = Form(""), exp_f7: str = Form(""), exp_f11: str = Form(""), exp_kq: str = Form(""), photo_url: str = Form(""), video1_url: str = Form(""), video2_url: str = Form(""), video3_url: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE new_players SET dorsal=%s, name=%s, position=%s, age=%s, club=%s, dominant_foot=%s, estimated_level=%s, fit_level=%s, priority_level=%s, control_skill=%s, passing_skill=%s, dribbling_skill=%s, shooting_skill=%s, speed_skill=%s, stamina_skill=%s, power_skill=%s, positioning_skill=%s, tactical_iq=%s, versatility_skill=%s, leadership_skill=%s, character_skill=%s, exp_f7=%s, exp_f11=%s, exp_kq=%s, photo_url=%s, video1_url=%s, video2_url=%s, video3_url=%s, scout_status=%s, notes=%s WHERE id=%s",
+        (dorsal.strip(), name.strip(), position.strip(), age.strip(), club.strip(), dominant_foot.strip(), estimated_level.strip(), fit_level.strip(), priority_level.strip(), control_skill.strip(), passing_skill.strip(), dribbling_skill.strip(), shooting_skill.strip(), speed_skill.strip(), stamina_skill.strip(), power_skill.strip(), positioning_skill.strip(), tactical_iq.strip(), versatility_skill.strip(), leadership_skill.strip(), character_skill.strip(), exp_f7.strip(), exp_f11.strip(), exp_kq.strip(), photo_url.strip(), video1_url.strip(), video2_url.strip(), video3_url.strip(), scout_status.strip(), notes.strip(), player_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return RedirectResponse(f"/new-player/{player_id}", status_code=303)
+
+
+@app.post("/new-player/delete/{player_id}")
+def delete_new_player(player_id: int, request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM new_players WHERE id=%s", (player_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/?tab=newplayers", status_code=303)
+
+
+@app.post("/new-player/to-preselection/{player_id}")
+def new_player_to_preselection(player_id: int, request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return RedirectResponse("/?tab=newplayers", status_code=303)
+    dorsal, name, position, club, notes = row
+    player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
+    try:
+        cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
+        created_player_id = cur.fetchone()[0]
+        cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close(); conn.close()
+    return RedirectResponse("/?tab=objectives", status_code=303)
