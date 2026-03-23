@@ -721,7 +721,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         players = cur.fetchall()
     elif tab == "newplayers":
         sql = """
-            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(notes,'')
+            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
             FROM new_players
             ORDER BY id DESC, name ASC
         """
@@ -1157,8 +1157,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "newplayers":
         rows = ""
-        for pid, dorsal, name, position, estimated_level, fit_level, notes in players:
-            scout_status = "Seguimiento"
+        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
