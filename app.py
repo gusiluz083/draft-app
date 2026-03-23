@@ -711,6 +711,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "database":
         allowed_sort = ["id", "name", "team", "position", "status"]
+    elif tab == "newplayers":
+        allowed_sort = ["id", "name", "position", "status"]
     else:
         allowed_sort = ["id", "name", "team", "position", "decision_status", "draft_round"]
     if sort not in allowed_sort:
@@ -725,6 +727,20 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             SELECT id, name, team, position, status, COALESCE(notes,'')
             FROM players
             ORDER BY {sort} {order_sql}
+        """
+        cur.execute(sql)
+        players = cur.fetchall()
+    elif tab == "newplayers":
+        sort_expr = {
+            "id": "id",
+            "name": "name",
+            "position": "position",
+            "status": "scout_status",
+        }.get(sort, "id")
+        sql = f"""
+            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
+            FROM new_players
+            ORDER BY {sort_expr} {order_sql}, id DESC
         """
         cur.execute(sql)
         players = cur.fetchall()
@@ -794,6 +810,19 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</tr></thead><tbody>{rows}</tbody></table>"
             f"{bulk_actions}</form>"
         )
+    elif tab == "newplayers":
+        rows = ""
+        for pid, dorsal, name, position, club, scout_status, notes in players:
+            search_blob = " ".join([dorsal or "", name or "", club or "", position or "", scout_status or "", notes or ""])
+            actions = "".join([
+                f"<a class='btn btn-light action-btn' href='/new-player/{pid}'>Editar</a>",
+                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
+                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+            ])
+            rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td></td><td>{html.escape(name or '')}</td><td>{html.escape(club or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status)}</span></td><td></td><td></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
+        if not rows:
+            rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas.</td></tr>"
+        table_html = f"<table><thead><tr><th></th><th>{head('name','Nombre')}</th><th>Equipo actual</th><th>{head('position','Posición')}</th><th>{head('status','Estado')}</th><th>Ronda</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
     else:
         position_pressure = {}
         for _pid, _name, _team, _position, _player_status, _notes, _decision_status, _draft_round, _round_order in players:
@@ -1173,7 +1202,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
         f"{"<div><label>Ronda</label><select id='liveRound'><option value=''>Todas</option>" + ''.join([f"<option value='{i}'>{i}</option>" for i in range(1,11)]) + "</select></div>" if tab == 'objectives' else "<div><label>Ronda</label><select id='liveRound' disabled><option value=''>No aplica</option></select></div>"}"
         f"</div><div style='margin-top:12px;'><button type='button' class='btn btn-secondary' onclick='clearFilters()'>Limpiar</button></div><div class='muted' style='margin-top:10px;'>Mostrando <strong id='visibleCount'>0</strong> jugadoras</div></div>"
-        f"<div class='card'><h2>{'Jugadoras' if tab=='database' else 'Jugadoras preseleccionadas de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
+        f"<div class='card'><h2>{'Jugadoras' if tab=='database' else 'Jugadoras nuevas' if tab=='newplayers' else 'Jugadoras preseleccionadas de ' + board_team if tab=='objectives' else 'Plantilla definitiva de ' + board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
     )
     return page(content)
 
