@@ -94,7 +94,6 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS players (
             id SERIAL PRIMARY KEY,
-            dorsal TEXT,
             name TEXT NOT NULL,
             team TEXT,
             position TEXT,
@@ -103,7 +102,6 @@ def init_db():
         )
         """
     )
-    cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS dorsal TEXT")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS team_player_decisions (
@@ -211,6 +209,7 @@ def init_db():
         ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     ]:
         cur.execute(f"ALTER TABLE new_players ADD COLUMN IF NOT EXISTS {_col} {_type}")
+    cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS dorsal TEXT")
     conn.commit()
     cur.close()
     conn.close()
@@ -773,8 +772,22 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             FROM new_players
             ORDER BY id DESC, name ASC
         """
-        cur.execute(sql)
-        players = cur.fetchall()
+        try:
+            cur.execute(sql)
+            players = cur.fetchall()
+        except Exception:
+            conn.rollback()
+            fallback_sql = """
+                SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(notes,'')
+                FROM new_players
+                ORDER BY id DESC, name ASC
+            """
+            try:
+                cur.execute(fallback_sql)
+                players = cur.fetchall()
+            except Exception:
+                conn.rollback()
+                players = []
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
@@ -1193,8 +1206,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div><label>Dorsal</label><input name='dorsal'></div>"
             "<div><label>Nombre y apellidos</label><input name='name' required></div>"
             "<div><label>Posición</label><select name='position'><option value='Portera'>Portera</option><option value='Defensa'>Defensa</option><option value='Medio'>Medio</option><option value='Delantera'>Delantera</option></select></div>"
-            "<div><label>Nivel estimado</label><select name='estimated_level'><option value=''>-</option><option>Top</option><option>Alta</option><option>Media</option><option>Baja</option></select></div>"
-            "<div><label>Encaje</label><select name='fit_level'><option value=''>-</option><option>Alto</option><option>Medio</option><option>Bajo</option></select></div>"
+            "<div><label>Club / Procedencia</label><input name='club'></div>"
+            "<div><label>Nivel estimado</label><select name='estimated_level'><option value=''>-</option><option>Top</option><option>Muy interesante</option><option>Interesante</option><option>Seguimiento</option><option>Descartable</option></select></div>"
+            "<div><label>Encaje</label><select name='fit_level'><option value=''>-</option><option>Encaja mucho</option><option>Encaja</option><option>Duda</option><option>No encaja</option></select></div>"
             "<div><label>Estado</label><select name='scout_status'><option>Seguimiento</option><option>Top</option><option>Interesante</option><option>Descartada</option></select></div>"
             "</div>"
             "<div style='margin-top:12px;'><label>Observaciones</label><textarea name='notes'></textarea></div>"
@@ -1205,11 +1219,17 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "newplayers":
         rows = ""
-        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
+        for row in players:
+            if len(row) == 8:
+                pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes = row
+            elif len(row) == 7:
+                pid, dorsal, name, position, estimated_level, fit_level, notes = row
+                scout_status = "Seguimiento"
+            else:
+                continue
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
-                f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ficha</a>",
-                f"<a class='btn btn-secondary action-btn' href='/new-player/{pid}' target='_blank'>Editar</a>",
+                f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
                 f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
@@ -1993,14 +2013,14 @@ def ensure_admin():
 
 
 @app.post("/new-player/add")
-def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
+def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), club: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO new_players (dorsal, name, position, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-        (dorsal.strip(), name.strip(), position.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
+        "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
     )
     conn.commit()
     cur.close()
@@ -2142,16 +2162,15 @@ def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str]
     cur = conn.cursor()
     try:
         for player_id in cleaned_ids:
-            cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+            cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
             row = cur.fetchone()
             if not row:
                 continue
-            dorsal, name, position, notes = row
+            dorsal, name, position, club, notes = row
             player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
-            cur.execute("INSERT INTO players (dorsal, name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id", (dorsal, name, board_team, position, "Disponible", player_notes))
+            cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
             created_player_id = cur.fetchone()[0]
             cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
-            cur.execute("DELETE FROM new_players WHERE id=%s", (player_id,))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -2171,18 +2190,17 @@ def new_player_to_preselection(player_id: int, request: Request):
         return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+    cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
     row = cur.fetchone()
     if not row:
         cur.close(); conn.close()
         return RedirectResponse("/?tab=newplayers", status_code=303)
-    dorsal, name, position, notes = row
+    dorsal, name, position, club, notes = row
     player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
     try:
-        cur.execute("INSERT INTO players (dorsal, name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id", (dorsal, name, board_team, position, "Disponible", player_notes))
+        cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
         created_player_id = cur.fetchone()[0]
         cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
-        cur.execute("DELETE FROM new_players WHERE id=%s", (player_id,))
         conn.commit()
     except Exception:
         conn.rollback()
