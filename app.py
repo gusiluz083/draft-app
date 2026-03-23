@@ -195,10 +195,10 @@ h1,h2,h3 { margin-top:0; }
 label { display:block; font-size:14px; margin-bottom:6px; font-weight:bold; }
 input,select,textarea,button { width:100%; padding:11px 12px; border:1px solid #cbd5e1; border-radius:10px; font-size:14px; }
 textarea { min-height:90px; resize:vertical; }
-button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; width:auto; white-space:nowrap; font-weight:600; }
+button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; width:auto; white-space:nowrap; font-weight:600; padding:11px 16px; border-radius:12px; box-shadow:0 4px 12px rgba(15,23,42,0.08); }
 .btn-secondary { background:#475569; } .btn-success { background:#16a34a; } .btn-danger { background:#dc2626; } .btn-warning { background:#d97706; } .btn-light { background:#0f766e; } .btn-dark { background:#0f172a; }
 .inline-form { display:inline; margin:0; }
-.actions-toolbar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.actions-toolbar { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
 .action-btn { padding:6px 9px !important; border-radius:9px !important; font-size:12px !important; line-height:1.1; min-height:30px; }
 .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; align-items:end; }
 .grid-2 { display:grid; grid-template-columns:2fr 1fr; gap:20px; }
@@ -598,7 +598,7 @@ def login_page(request: Request, error: str = ""):
         "<form action='/login' method='post'>"
         "<div style='margin:12px 0;'><label>Usuario</label><input name='username' required></div>"
         "<div style='margin:12px 0;'><label>Contraseña</label><input type='password' name='password' required></div>"
-        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación desarrollada por Aniol y Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
+        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación creada por Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
     )
 
 
