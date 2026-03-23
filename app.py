@@ -1083,17 +1083,25 @@ def create_user(request: Request, username: str = Form(...), password: str = For
     user = require_user(request)
     if not user or not user["is_admin"]:
         return RedirectResponse("/login", status_code=303)
+
+    team_value = "" if is_admin == "1" else (team if team in TEAMS else "")
+
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO users (username, password_hash, is_admin, team) VALUES (%s,%s,%s,%s)", (username.strip(), hash_text(password), is_admin == "1", team_value))
+        cur.execute(
+            "INSERT INTO users (username, password_hash, is_admin, team) VALUES (%s,%s,%s,%s)",
+            (username.strip(), hash_text(password), is_admin == "1", team_value),
+        )
         conn.commit()
     except Exception:
         conn.rollback()
     finally:
         cur.close()
         conn.close()
+
     return RedirectResponse("/", status_code=303)
+
 
 
 
