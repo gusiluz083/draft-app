@@ -244,10 +244,10 @@ function filterAllBoard(){
  const round=normalizeText(rd ? rd.value : '');
  const rows=document.querySelectorAll("tr[data-all-board-row='1']");
  rows.forEach((row)=>{
-   const hay=normalizeText(row.getAttribute('data-search') || '');
-   const rr=normalizeText(row.getAttribute('data-round') || '');
+   const hay=normalizeText(row.getAttribute('data-search') || row.dataset.search || '');
+   const rr=normalizeText(row.getAttribute('data-round') || row.dataset.round || '');
    const show=(!text || hay.includes(text)) && (!round || rr===round);
-   row.style.display=show ? '' : 'none';
+   row.style.display = show ? '' : 'none';
  });
 }
 function clearAllBoardFilters(){
@@ -902,8 +902,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
         all_board_html = (
             "<div class='allboard-toolbar'>"
-            "<input id='allBoardSearch' placeholder='Buscar jugadora...'>"
-            "<select id='allBoardRound'>"
+            "<input id='allBoardSearch' placeholder='Buscar jugadora...' oninput='filterAllBoard()'>"
+            "<select id='allBoardRound' onchange='filterAllBoard()'>"
             "<option value=''>Todas las rondas</option>"
             + "".join([f"<option value='{i}'>{i}</option>" for i in range(1,11)])
             + "</select>"
