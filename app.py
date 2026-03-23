@@ -195,10 +195,10 @@ h1,h2,h3 { margin-top:0; }
 label { display:block; font-size:14px; margin-bottom:6px; font-weight:bold; }
 input,select,textarea,button { width:100%; padding:11px 12px; border:1px solid #cbd5e1; border-radius:10px; font-size:14px; }
 textarea { min-height:90px; resize:vertical; }
-button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; width:auto; white-space:nowrap; font-weight:600; padding:11px 16px; border-radius:12px; box-shadow:0 4px 12px rgba(15,23,42,0.08); }
+button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; width:auto; white-space:nowrap; font-weight:600; }
 .btn-secondary { background:#475569; } .btn-success { background:#16a34a; } .btn-danger { background:#dc2626; } .btn-warning { background:#d97706; } .btn-light { background:#0f766e; } .btn-dark { background:#0f172a; }
 .inline-form { display:inline; margin:0; }
-.actions-toolbar { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+.actions-toolbar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 .action-btn { padding:6px 9px !important; border-radius:9px !important; font-size:12px !important; line-height:1.1; min-height:30px; }
 .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; align-items:end; }
 .grid-2 { display:grid; grid-template-columns:2fr 1fr; gap:20px; }
@@ -700,6 +700,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "database":
         allowed_sort = ["id", "name", "team", "position", "status"]
+    elif tab == "newplayers":
+        allowed_sort = ["id", "name", "position", "status"]
     else:
         allowed_sort = ["id", "name", "team", "position", "decision_status", "draft_round"]
     if sort not in allowed_sort:
@@ -714,6 +716,14 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             SELECT id, name, team, position, status, COALESCE(notes,'')
             FROM players
             ORDER BY {sort} {order_sql}
+        """
+        cur.execute(sql)
+        players = cur.fetchall()
+    elif tab == "newplayers":
+        sql = f"""
+            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
+            FROM new_players
+            ORDER BY id DESC, name ASC
         """
         cur.execute(sql)
         players = cur.fetchall()
@@ -782,6 +792,30 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<th>Acciones</th>"
             f"</tr></thead><tbody>{rows}</tbody></table>"
             f"{bulk_actions}</form>"
+        )
+    elif tab == "newplayers":
+        rows = ""
+        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
+            search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
+            actions = "".join([
+                f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
+                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
+                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+            ])
+            rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
+        if not rows:
+            rows = "<tr><td colspan='8' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
+        table_html = (
+            f"<table><thead><tr>"
+            f"<th>#</th>"
+            f"<th>Nombre</th>"
+            f"<th>Posición</th>"
+            f"<th>Nivel</th>"
+            f"<th>Encaje</th>"
+            f"<th>Estado</th>"
+            f"<th>Notas</th>"
+            f"<th>Acciones</th>"
+            f"</tr></thead><tbody>{rows}</tbody></table>"
         )
     else:
         position_pressure = {}
@@ -1154,7 +1188,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
         f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
-        f"{add_box}{wildcard_box}"
+        f"{add_box}{'' if tab == 'newplayers' else wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
         f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
