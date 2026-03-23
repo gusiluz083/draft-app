@@ -242,6 +242,50 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 .stat-number { font-size:28px; font-weight:bold; margin-top:4px; }
 .note-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px; }
 @media (max-width:900px) { .grid,.grid-2,.grid-3,.team-cards,.stats { grid-template-columns:1fr; } }
+
+/* ===== NAVBAR PROFESIONAL DRAFT MANAGER ===== */
+.navbar {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:14px 18px;
+    background:#0f172a;
+    border-radius:14px;
+    margin-bottom:22px;
+}
+
+.navbar a {
+    text-decoration:none;
+    font-weight:600;
+    font-size:14px;
+    padding:8px 16px;
+    border-radius:999px;
+    color:#cbd5e1;
+    transition:all .2s ease;
+}
+
+.navbar a:hover {
+    background:#1e293b;
+    color:white;
+}
+
+.navbar a.active {
+    background:#2563eb;
+    color:white;
+    box-shadow:0 2px 10px rgba(0,0,0,.25);
+}
+
+.navbar .right {
+    margin-left:auto;
+}
+
+a[href="/change-team"], 
+a[href="/logout"] {
+    background:#111827 !important;
+    color:white !important;
+    border-radius:8px !important;
+}
+
 </style>
 """
 
