@@ -176,40 +176,6 @@ def init_db():
         )
         """
     )
-    for _col, _type in [
-        ("dorsal", "TEXT"),
-        ("position", "TEXT"),
-        ("age", "TEXT"),
-        ("club", "TEXT"),
-        ("dominant_foot", "TEXT"),
-        ("estimated_level", "TEXT"),
-        ("fit_level", "TEXT"),
-        ("priority_level", "TEXT"),
-        ("control_skill", "TEXT"),
-        ("passing_skill", "TEXT"),
-        ("dribbling_skill", "TEXT"),
-        ("shooting_skill", "TEXT"),
-        ("speed_skill", "TEXT"),
-        ("stamina_skill", "TEXT"),
-        ("power_skill", "TEXT"),
-        ("positioning_skill", "TEXT"),
-        ("tactical_iq", "TEXT"),
-        ("versatility_skill", "TEXT"),
-        ("leadership_skill", "TEXT"),
-        ("character_skill", "TEXT"),
-        ("exp_f7", "TEXT"),
-        ("exp_f11", "TEXT"),
-        ("exp_kq", "TEXT"),
-        ("photo_url", "TEXT"),
-        ("video1_url", "TEXT"),
-        ("video2_url", "TEXT"),
-        ("video3_url", "TEXT"),
-        ("scout_status", "TEXT DEFAULT 'Seguimiento'"),
-        ("notes", "TEXT DEFAULT ''"),
-        ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-    ]:
-        cur.execute(f"ALTER TABLE new_players ADD COLUMN IF NOT EXISTS {_col} {_type}")
-    cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS dorsal TEXT")
     conn.commit()
     cur.close()
     conn.close()
@@ -767,27 +733,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         cur.execute(sql)
         players = cur.fetchall()
     elif tab == "newplayers":
-        sql = """
-            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
-            FROM new_players
-            ORDER BY id DESC, name ASC
-        """
-        try:
-            cur.execute(sql)
-            players = cur.fetchall()
-        except Exception:
-            conn.rollback()
-            fallback_sql = """
-                SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(notes,'')
-                FROM new_players
-                ORDER BY id DESC, name ASC
-            """
-            try:
-                cur.execute(fallback_sql)
-                players = cur.fetchall()
-            except Exception:
-                conn.rollback()
-                players = []
+        players = []
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
@@ -1219,14 +1165,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "newplayers":
         rows = ""
-        for row in players:
-            if len(row) == 8:
-                pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes = row
-            elif len(row) == 7:
-                pid, dorsal, name, position, estimated_level, fit_level, notes = row
-                scout_status = "Seguimiento"
-            else:
-                continue
+        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
