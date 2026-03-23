@@ -695,7 +695,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
 
-    if tab not in ["database", "objectives", "final", "draftday"]:
+    if tab not in ["database", "newplayers", "objectives", "final", "draftday"]:
         tab = "database"
 
     if tab == "database":
