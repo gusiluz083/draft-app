@@ -720,7 +720,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         cur.execute(sql)
         players = cur.fetchall()
     elif tab == "newplayers":
-        sql = f"""
+        sql = """
             SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
             FROM new_players
             ORDER BY id DESC, name ASC
@@ -792,30 +792,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<th>Acciones</th>"
             f"</tr></thead><tbody>{rows}</tbody></table>"
             f"{bulk_actions}</form>"
-        )
-    elif tab == "newplayers":
-        rows = ""
-        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
-            search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
-            actions = "".join([
-                f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
-                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
-                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
-            ])
-            rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
-        if not rows:
-            rows = "<tr><td colspan='8' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
-        table_html = (
-            f"<table><thead><tr>"
-            f"<th>#</th>"
-            f"<th>Nombre</th>"
-            f"<th>Posición</th>"
-            f"<th>Nivel</th>"
-            f"<th>Encaje</th>"
-            f"<th>Estado</th>"
-            f"<th>Notas</th>"
-            f"<th>Acciones</th>"
-            f"</tr></thead><tbody>{rows}</tbody></table>"
         )
     else:
         position_pressure = {}
@@ -1178,6 +1154,46 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "</form></div>"
         )
 
+
+    if tab == "newplayers":
+        rows = ""
+        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
+            search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
+            actions = "".join([
+                f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
+                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
+                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+            ])
+            rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='new_player_ids' value='{pid}'></td><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
+        if not rows:
+            rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
+
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        table_html = (
+            f"<form action='/new-player/bulk-to-preselection' method='post'>"
+            f"{bulk_actions}"
+            f"<table><thead><tr>"
+            f"<th><input id='selectAllNewPlayers' type='checkbox' onclick='toggleAllRows(this, \'new_player_ids\');'></th>"
+            f"<th>#</th><th>Nombre</th><th>Posición</th><th>Nivel</th><th>Encaje</th><th>Estado</th><th>Notas</th><th>Acciones</th>"
+            f"</tr></thead><tbody>{rows}</tbody></table>"
+            f"{bulk_actions}</form>"
+        )
+
+        content = (
+            f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
+            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
+            f"{admin_box}"
+            f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
+            f"{add_box}"
+            f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
+            f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, dorsal, posición, notas'></div>"
+            f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Seguimiento'>Seguimiento</option><option value='Top'>Top</option><option value='Interesante'>Interesante</option><option value='Descartada'>Descartada</option></select></div>"
+            f"<div><label>Ronda</label><select id='liveRound' disabled><option value=''>No aplica</option></select></div></div><div style='margin-top:12px;'><button type='button' class='btn btn-secondary' onclick='clearFilters()'>Limpiar</button></div><div class='muted' style='margin-top:10px;'>Mostrando <strong id='visibleCount'>0</strong> jugadoras</div></div>"
+            f"<div class='card'><h2>Jugadoras nuevas de {board_team}</h2><div class='table-wrap'>{table_html}</div></div>"
+        )
+        return page(content)
+
     wildcard_box = ""
     if tab == "final":
         wildcard_box = f"<div class='card'><h2>Wildcard</h2><form action='/wildcard' method='post'><div class='grid-2'><div><label>Nombre jugadora wildcard</label><input name='name' value='{html.escape(wildcard_name)}' placeholder='Escribe el nombre'></div><div style='display:flex;align-items:end;'><button type='submit'>Guardar wildcard</button></div></div></form><div class='note-box' style='margin-top:12px;'><strong>Wildcard actual:</strong> {html.escape(wildcard_name or 'Sin definir')}</div></div>"
@@ -1188,7 +1204,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
         f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
-        f"{add_box}{'' if tab == 'newplayers' else wildcard_box}"
+        f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
         f"<div><label>Estado</label><select id='liveStatus'><option value=''>Todos</option><option value='Disponible'>Disponible</option><option value='Objetivo'>Objetivo</option><option value='Elegida'>Elegida</option><option value='Descartada'>Descartada</option><option value='Fichada por otro equipo'>Fichada por otro equipo</option><option value='Lesionada'>Lesionada</option><option value='No disponible'>No disponible</option></select></div>"
@@ -2048,6 +2064,52 @@ def delete_new_player(player_id: int, request: Request):
         cur.close()
         conn.close()
     return RedirectResponse("/?tab=newplayers", status_code=303)
+
+
+
+@app.post("/new-player/bulk-to-preselection")
+def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str] = Form(None)):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    raw_ids = new_player_ids or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+
+    cleaned_ids = []
+    for value in raw_ids:
+        try:
+            cleaned_ids.append(int(str(value).strip()))
+        except Exception:
+            pass
+
+    if not cleaned_ids:
+        return RedirectResponse("/?tab=newplayers", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        for player_id in cleaned_ids:
+            cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+            row = cur.fetchone()
+            if not row:
+                continue
+            dorsal, name, position, club, notes = row
+            player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
+            cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
+            created_player_id = cur.fetchone()[0]
+            cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/?tab=objectives", status_code=303)
 
 
 @app.post("/new-player/to-preselection/{player_id}")
