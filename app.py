@@ -85,6 +85,7 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             is_admin BOOLEAN DEFAULT FALSE,
+            team TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -334,7 +335,7 @@ def get_current_user(request: Request):
         return None
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, is_admin, COALESCE(team,'') FROM users")
+    cur.execute("SELECT id, username, is_admin, COALESCE(team, '') FROM users")
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -981,11 +982,24 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
             if uname == user["username"]:
                 delete_button = "<span class='muted'>No borrar</span>"
+
+            team_options = (
+                f"<option value='' {'selected' if not team_value else ''}>Sin equipo</option>"
+                + "".join([f"<option value='{t}' {'selected' if team_value == t else ''}>{t}</option>" for t in TEAMS])
+            )
+            team_manage = (
+                "<span class='muted'>Todos</span>" if is_admin_flag else
+                f"<form class='inline-form actions-toolbar' action='/users/team/{uid}' method='post'>"
+                f"<select name='team' style='width:120px;padding:6px 8px;'>{team_options}</select>"
+                f"<button class='btn btn-secondary action-btn' type='submit'>Guardar</button>"
+                f"</form>"
+            )
+
             user_rows += (
                 f"<tr>"
                 f"<td>{html.escape(uname)}</td>"
                 f"<td>{role_text}</td>"
-                f"<td>{html.escape(team_text)}</td>"
+                f"<td>{team_manage}</td>"
                 f"<td>{created_text}</td>"
                 f"<td>"
                 f"<form class='inline-form actions-toolbar' action='/users/role/{uid}' method='post'>"
@@ -1004,7 +1018,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         if not user_rows:
-            user_rows = "<tr><td colspan='6' class='muted'>No hay usuarios.</td></tr>"
+            user_rows = "<tr><td colspan='7' class='muted'>No hay usuarios.</td></tr>"
 
         admin_box = (
             "<div class='card'><h2>Administración de usuarios</h2>"
@@ -1013,7 +1027,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div><label>Usuario</label><input name='username' required></div>"
             "<div><label>Contraseña</label><input type='password' name='password' required></div>"
             "<div><label>Rol</label><select name='is_admin' id='createUserRole'><option value='0'>Usuario</option><option value='1'>Admin</option></select></div>"
-            "<div><label>Equipo asignado</label><select name='team' id='createUserTeam'><option value=''>Sin asignar</option><option value='PILARES'>PILARES</option><option value='MADAM'>MADAM</option><option value='COLS'>COLS</option></select></div>"
+            "<div><label>Equipo asignado</label><select name='team' id='createUserTeam'><option value=''>Sin equipo</option><option value='PILARES'>PILARES</option><option value='MADAM'>MADAM</option><option value='COLS'>COLS</option></select></div>"
             "<div><button type='submit'>Crear usuario</button></div>"
             "</form></div>"
             "<div class='table-wrap'><table>"
@@ -1102,6 +1116,26 @@ def update_user_role(user_id: int, request: Request, is_admin: str = Form("0")):
         conn.close()
     return RedirectResponse("/", status_code=303)
 
+
+
+@app.post("/users/team/{user_id}")
+def update_user_team(user_id: int, request: Request, team: str = Form("")):
+    user = require_user(request)
+    if not user or not user["is_admin"]:
+        return RedirectResponse("/login", status_code=303)
+
+    team_value = team if team in TEAMS else ""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET team=%s WHERE id=%s AND is_admin=FALSE", (team_value, user_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/", status_code=303)
 
 @app.post("/users/password/{user_id}")
 def update_user_password(user_id: int, request: Request, password: str = Form("")):
