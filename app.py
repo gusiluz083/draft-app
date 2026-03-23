@@ -288,38 +288,28 @@ document.addEventListener('DOMContentLoaded',()=>{
  const rd=document.getElementById('liveRound');
  const abs=document.getElementById('allBoardSearch');
  const abr=document.getElementById('allBoardRound');
- if(s) s.addEventListener('input',filterRows);
- if(st) st.addEventListener('change',filterRows);
- if(rd) rd.addEventListener('change',filterRows);
- if(abs) abs.addEventListener('input',filterAllBoard);
- if(abr) abr.addEventListener('change',filterAllBoard);
+ if(s) s.addEventListener('input', filterRows);
+ if(st) st.addEventListener('change', filterRows);
+ if(rd) rd.addEventListener('change', filterRows);
+ if(abs) abs.addEventListener('input', filterAllBoard);
+ if(abr) abr.addEventListener('change', filterAllBoard);
  filterRows();
  filterAllBoard();
+
  const roleSel=document.getElementById('createUserRole');
-const teamSel=document.getElementById('createUserTeam');
-function syncCreateUserTeam(){
- if(!roleSel || !teamSel) return;
- const isAdmin = roleSel.value === '1';
- teamSel.disabled = isAdmin;
- if(isAdmin) teamSel.value = '';
-}
-if(roleSel){
- roleSel.addEventListener('change', syncCreateUserTeam);
- syncCreateUserTeam();
-}
-const roleSel=document.getElementById('createUserRole');
-const teamSel=document.getElementById('createUserTeam');
-function syncCreateUserTeam(){
- if(!roleSel || !teamSel) return;
- const isAdmin = roleSel.value === '1';
- teamSel.disabled = isAdmin;
- if(isAdmin) teamSel.value = '';
-}
-if(roleSel){
- roleSel.addEventListener('change', syncCreateUserTeam);
- syncCreateUserTeam();
-}
-if(typeof refreshDraftdayEmptyState === 'function') refreshDraftdayEmptyState();
+ const teamSel=document.getElementById('createUserTeam');
+ function syncCreateUserTeam(){
+   if(!roleSel || !teamSel) return;
+   const isAdmin = roleSel.value === '1';
+   teamSel.disabled = isAdmin;
+   if(isAdmin) teamSel.value = '';
+ }
+ if(roleSel){
+   roleSel.addEventListener('change', syncCreateUserTeam);
+   syncCreateUserTeam();
+ }
+
+ if(typeof refreshDraftdayEmptyState === 'function') refreshDraftdayEmptyState();
 });
 </script>
 """
