@@ -363,6 +363,12 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 .board-side-list { display:flex; flex-direction:column; gap:10px; max-height:600px; overflow:auto; }
 .board-side-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:12px; background:#f8fafc; }
 .board-side-item strong { font-size:13px; }
+.board-side-item .mini-meta { display:block; margin-top:2px; color:#64748b; font-size:12px; }
+.board-source-group { margin-top:14px; }
+.board-source-group h4 { margin:0 0 8px; font-size:13px; }
+.board-source-list { display:flex; flex-direction:column; gap:8px; max-height:220px; overflow:auto; }
+.board-source-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
+.board-source-item button { white-space:nowrap; }
 .board-empty { color:#64748b; font-size:14px; }
 @media (max-width: 980px) { .board-shell { grid-template-columns:1fr; } }
 @media (max-width:900px) { .grid,.grid-2,.grid-3,.team-cards,.stats { grid-template-columns:1fr; } }
@@ -480,20 +486,64 @@ function initBoard(){
  const pitch=document.getElementById('boardPitch');
  const input=document.getElementById('boardStateInput');
  const list=document.getElementById('boardSideList');
+ const sourcesBox=document.getElementById('boardSources');
+ const sourceDataEl=document.getElementById('boardAvailableData');
  if(!pitch || !input) return;
  let players=[];
+ let available={objectives:[], final:[], newplayers:[]};
  try { players = JSON.parse(input.value || '[]'); } catch(e){ players=[]; }
+ try { available = JSON.parse(sourceDataEl ? (sourceDataEl.textContent || '{}') : '{}'); } catch(e){ available={objectives:[], final:[], newplayers:[]}; }
  if(!Array.isArray(players)) players=[];
  function saveState(){ input.value = JSON.stringify(players); renderList(); }
  function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
  function esc(v){ return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
  function shortLabel(name, idx){ const t=(name||'').trim(); return t ? t.substring(0,2).toUpperCase() : String(idx+1); }
+ function existsBySource(sourceKey, itemId){ return players.some(p => p.sourceKey===sourceKey && String(p.sourceId||'')===String(itemId||'')); }
+ function addFromSource(sourceKey, item){
+   if(!item) return;
+   if(existsBySource(sourceKey, item.id)) return;
+   players.push({id:'src-'+sourceKey+'-'+item.id, sourceKey:sourceKey, sourceId:item.id, name:item.name||'', x:50, y:50});
+   renderPlayers(); saveState(); renderSources();
+ }
  function renderList(){
    if(!list) return;
    if(!players.length){ list.innerHTML = "<div class='board-empty'>No hay jugadoras en la pizarra.</div>"; return; }
-   list.innerHTML = players.map((p,idx)=>`<div class="board-side-item"><strong>${esc((p.name||'Sin nombre'))}</strong><button type="button" class="btn btn-danger action-btn" data-remove-board="${idx}">Quitar</button></div>`).join('');
+   list.innerHTML = players.map((p,idx)=>{
+     const meta = p.sourceLabel ? `<span class="mini-meta">${esc(p.sourceLabel)}</span>` : '';
+     return `<div class="board-side-item"><div><strong>${esc((p.name||'Sin nombre'))}</strong>${meta}</div><button type="button" class="btn btn-danger action-btn" data-remove-board="${idx}">Quitar</button></div>`;
+   }).join('');
    list.querySelectorAll('[data-remove-board]').forEach(btn=>{
-     btn.addEventListener('click', ()=>{ const i=parseInt(btn.getAttribute('data-remove-board')||'-1',10); if(i>=0){ players.splice(i,1); renderPlayers(); saveState(); } });
+     btn.addEventListener('click', ()=>{ const i=parseInt(btn.getAttribute('data-remove-board')||'-1',10); if(i>=0){ players.splice(i,1); renderPlayers(); saveState(); renderSources(); } });
+   });
+ }
+ function renderSources(){
+   if(!sourcesBox) return;
+   const groups = [
+     {key:'final', label:'Plantilla', items:Array.isArray(available.final)?available.final:[]},
+     {key:'objectives', label:'Preselección', items:Array.isArray(available.objectives)?available.objectives:[]},
+     {key:'newplayers', label:'Jugadoras nuevas', items:Array.isArray(available.newplayers)?available.newplayers:[]}
+   ];
+   sourcesBox.innerHTML = groups.map(group=>{
+     const rows = group.items.length ? group.items.map(item=>{
+       const disabled = existsBySource(group.key, item.id);
+       const meta = [item.position||'', item.team||''].filter(Boolean).join(' · ');
+       return `<div class="board-source-item"><div><strong>${esc(item.name||'Sin nombre')}</strong>${meta ? `<span class="mini-meta">${esc(meta)}</span>` : ''}</div><button type="button" class="btn btn-secondary action-btn" data-board-add="${group.key}:${esc(String(item.id))}" ${disabled ? 'disabled' : ''}>${disabled ? 'Añadida' : 'Añadir'}</button></div>`;
+     }).join('') : `<div class='board-empty'>Sin jugadoras disponibles.</div>`;
+     return `<div class="board-source-group"><h4>${group.label}</h4><div class="board-source-list">${rows}</div></div>`;
+   }).join('');
+   sourcesBox.querySelectorAll('[data-board-add]').forEach(btn=>{
+     btn.addEventListener('click', ()=>{
+       const raw = btn.getAttribute('data-board-add') || '';
+       const parts = raw.split(':');
+       const sourceKey = parts[0] || '';
+       const sourceId = parts.slice(1).join(':');
+       const groupItems = Array.isArray(available[sourceKey]) ? available[sourceKey] : [];
+       const item = groupItems.find(x => String(x.id) === String(sourceId));
+       if(item){
+         const sourceLabelMap = {final:'Plantilla', objectives:'Preselección', newplayers:'Jugadoras nuevas'};
+         addFromSource(sourceKey, {...item, sourceLabel: sourceLabelMap[sourceKey] || ''});
+       }
+     });
    });
  }
  function renderPlayers(){
@@ -528,10 +578,17 @@ function initBoard(){
    });
  }
  const addBtn=document.getElementById('addBoardPlayer');
- if(addBtn){ addBtn.addEventListener('click', ()=>{ players.push({id:'p'+Date.now(), name:'', x:50, y:50}); renderPlayers(); saveState(); }); }
+ if(addBtn){ addBtn.addEventListener('click', ()=>{ players.push({id:'p'+Date.now(), name:'', x:50, y:50}); renderPlayers(); saveState(); renderSources(); }); }
  const clearBtn=document.getElementById('clearBoardPlayers');
- if(clearBtn){ clearBtn.addEventListener('click', ()=>{ if(confirm('¿Vaciar la pizarra?')){ players=[]; renderPlayers(); saveState(); } }); }
- renderPlayers(); saveState();
+ if(clearBtn){ clearBtn.addEventListener('click', ()=>{ if(confirm('¿Vaciar la pizarra?')){ players=[]; renderPlayers(); saveState(); renderSources(); } }); }
+ players = players.map(p=>{
+   if(p && typeof p === 'object'){
+     const labelMap = {final:'Plantilla', objectives:'Preselección', newplayers:'Jugadoras nuevas'};
+     if(!p.sourceLabel && p.sourceKey && labelMap[p.sourceKey]) p.sourceLabel = labelMap[p.sourceKey];
+   }
+   return p;
+ });
+ renderPlayers(); saveState(); renderSources();
 }
 </script>
 """
@@ -1410,12 +1467,48 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "board":
         board_state = get_team_board_state(board_team)
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT p.id, p.name, COALESCE(p.position,''), COALESCE(p.team,'')
+            FROM team_player_decisions d
+            JOIN players p ON p.id = d.player_id
+            WHERE d.board_team = %s AND d.status = 'Objetivo'
+            ORDER BY COALESCE(d.draft_round, 99), COALESCE(d.round_order, 999), p.name ASC
+            """,
+            (board_team,)
+        )
+        board_objectives = [{"id": r[0], "name": r[1], "position": r[2], "team": r[3]} for r in cur.fetchall()]
+        cur.execute(
+            """
+            SELECT p.id, p.name, COALESCE(p.position,''), COALESCE(p.team,'')
+            FROM team_player_decisions d
+            JOIN players p ON p.id = d.player_id
+            WHERE d.board_team = %s AND d.status = 'Elegida'
+            ORDER BY p.name ASC
+            """,
+            (board_team,)
+        )
+        board_final = [{"id": r[0], "name": r[1], "position": r[2], "team": r[3]} for r in cur.fetchall()]
+        cur.execute(
+            """
+            SELECT id, name, COALESCE(position,''), COALESCE(club,'')
+            FROM new_players
+            ORDER BY created_at DESC, name ASC
+            LIMIT 100
+            """
+        )
+        board_newplayers = [{"id": r[0], "name": r[1], "position": r[2], "team": r[3]} for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        board_available = json.dumps({"objectives": board_objectives, "final": board_final, "newplayers": board_newplayers}, ensure_ascii=False)
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
             f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='card board-card'><h2>Pizarra</h2><div class='muted' style='margin-bottom:12px;'>Libre, con nombres editables y guardado por equipo.</div>"
-            f"<form action='/board/save' method='post'><input type='hidden' id='boardStateInput' name='board_state' value='{html.escape(json.dumps(board_state, ensure_ascii=False))}'>"
-            f"<div class='board-shell'><div><div class='board-toolbar'><button type='button' class='btn' id='addBoardPlayer'>Añadir jugadora</button><button type='button' class='btn btn-secondary' id='clearBoardPlayers'>Vaciar pizarra</button><button type='submit' class='btn btn-success'>Guardar pizarra</button></div><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div></div><div class='card' style='margin-bottom:0;'><h3 style='margin-bottom:12px;'>Jugadoras en pizarra</h3><div id='boardSideList' class='board-side-list'></div></div></div></form></div>"
+            f"<form action='/board/save' method='post'><input type='hidden' id='boardStateInput' name='board_state' value='{html.escape(json.dumps(board_state, ensure_ascii=False))}'><script id='boardAvailableData' type='application/json'>{html.escape(board_available)}</script>"
+            f"<div class='board-shell'><div><div class='board-toolbar'><button type='button' class='btn' id='addBoardPlayer'>Añadir jugadora</button><button type='button' class='btn btn-secondary' id='clearBoardPlayers'>Vaciar pizarra</button><button type='submit' class='btn btn-success'>Guardar pizarra</button></div><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div></div><div class='card' style='margin-bottom:0;'><h3 style='margin-bottom:12px;'>Jugadoras en pizarra</h3><div id='boardSideList' class='board-side-list'></div><div id='boardSources'></div></div></div></form></div>"
         )
         return page(content)
 
