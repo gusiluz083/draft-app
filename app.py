@@ -827,7 +827,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
-                f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+                f"{f'<form class=\'inline-form\' action=\'/delete-player/{pid}\' method=\'post\' onsubmit=\"return confirm(\'¿Seguro que quieres borrar esta jugadora?\')\"><button class=\'btn btn-danger action-btn\' type=\'submit\'>Eliminar</button></form>' if user.get('is_admin') else ''}",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
@@ -886,7 +886,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
                 "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' formmethod='post' name='status' value='Objetivo'>Añadir a Draft Day</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
-                "<a class='btn btn-light' href='/export?tab=objectives'>Exportar Excel</a>"
                 "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear toda la preselección de este equipo?')\">Reset preselección</button>"
                 "</div>"
             )
@@ -1892,8 +1891,11 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
 
 @app.post("/delete-player/{player_id}")
 def delete_player(player_id: int, request: Request):
-    if not require_user(request):
+    user = require_user(request)
+    if not user:
         return RedirectResponse("/login", status_code=303)
+    if not user.get("is_admin"):
+        return RedirectResponse("/?tab=database", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
     try:
