@@ -36,7 +36,6 @@ def get_conn():
         cur = conn.cursor()
         cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_draftday_state (
@@ -87,13 +86,10 @@ def init_db():
             password_hash TEXT NOT NULL,
             is_admin BOOLEAN DEFAULT FALSE,
             team TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
-    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
-    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS players (
@@ -585,7 +581,7 @@ def enhanced_risk_level(picks_remaining, round_order, position, position_pressur
 def list_users_data():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, is_admin, COALESCE(team,''), created_at, last_login FROM users ORDER BY username ASC")
+    cur.execute("SELECT id, username, is_admin, COALESCE(team,''), created_at FROM users ORDER BY username ASC")
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -614,8 +610,6 @@ def login(username: str = Form(...), password: str = Form(...)):
     if username == ADMIN_USER and password == ADMIN_PASSWORD:
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE username=%s", (ADMIN_USER,))
-        conn.commit()
         cur.execute("SELECT id, username FROM users WHERE username=%s", (ADMIN_USER,))
         row = cur.fetchone()
         cur.close()
@@ -637,13 +631,6 @@ def login(username: str = Form(...), password: str = Form(...)):
     user_id, db_username, password_hash, is_admin_flag, user_team = row
     if password_hash != hash_text(password):
         return RedirectResponse("/login?error=1", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id=%s", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
 
     allowed_teams = TEAMS[:] if is_admin_flag else (TEAMS[:] if user_team == "__ALL__" else [t.strip() for t in user_team.split(",") if t.strip() in TEAMS])
     next_path = "/select-team" if (is_admin_flag or len(allowed_teams) > 1) else "/"
@@ -791,7 +778,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-danger' type='submit' formaction='/bulk-delete-players' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar las jugadoras seleccionadas?')\">Eliminar seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'></button></div>"
         table_html = (
             f"<form action='/bulk-objective' method='post'>"
             f"{bulk_actions}"
@@ -1059,9 +1046,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             team_lock_notice = f"<div class='card'><strong>Equipos asignados:</strong> {html.escape(allowed_text)}.</div>"
     if user["is_admin"]:
         user_rows = ""
-        for uid, uname, is_admin_flag, team_value, created_at, last_login in list_users_data():
+        for uid, uname, is_admin_flag, team_value, created_at in list_users_data():
             created_text = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
-            last_login_text = last_login.strftime("%Y-%m-%d %H:%M") if last_login else "Nunca"
             role_text = "Admin" if is_admin_flag else "Usuario"
             team_text = "Todos" if is_admin_flag else ("Todos los equipos" if team_value == "__ALL__" else (team_value or "Sin equipo"))
             role_options = (
@@ -1094,7 +1080,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<td>{role_text}</td>"
                 f"<td>{team_manage}</td>"
                 f"<td>{created_text}</td>"
-                f"<td>{last_login_text}</td>"
                 f"<td>"
                 f"<form class='inline-form actions-toolbar' action='/users/role/{uid}' method='post'>"
                 f"<select name='is_admin' style='width:110px;padding:6px 8px;'>{role_options}</select>"
@@ -1112,7 +1097,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         if not user_rows:
-            user_rows = "<tr><td colspan='8' class='muted'>No hay usuarios.</td></tr>"
+            user_rows = "<tr><td colspan='7' class='muted'>No hay usuarios.</td></tr>"
 
         admin_box = (
             "<div class='card'><h2>Administración de usuarios</h2>"
@@ -1125,7 +1110,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div><button type='submit'>Crear usuario</button></div>"
             "</form></div>"
             "<div class='table-wrap'><table>"
-            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Último acceso</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
+            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
             f"<tbody>{user_rows}</tbody></table></div>"
             "</div>"
         )
@@ -1176,16 +1161,16 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
-                f"<button class='btn btn-warning action-btn' type='submit' formaction='/new-player/to-preselection/{pid}' formmethod='post'>Añadir a preselección</button>",
-                f"<button class='btn btn-danger action-btn' type='submit' formaction='/new-player/delete/{pid}' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\">Eliminar</button>",
+                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
+                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='new_player_ids' value='{pid}'></td><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
 
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-danger' type='submit' formaction='/new-players/bulk-delete' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar las jugadoras nuevas seleccionadas?')\">Eliminar seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
-            f"<form action='/new-players/bulk-to-preselection' method='post'>"
+            f"<form action='/new-player/bulk-to-preselection' method='post'>"
             f"{bulk_actions}"
             f"<table><thead><tr>"
             f"<th><input id='selectAllNewPlayers' type='checkbox' onclick='toggleAllRows(this, \\'new_player_ids\\');'></th>"
@@ -1404,39 +1389,6 @@ def bulk_objective(request: Request, player_ids: list[str] = Form(None)):
         conn.close()
 
     return RedirectResponse("/?tab=objectives", status_code=303)
-
-
-@app.post("/bulk-delete-players")
-def bulk_delete_players(request: Request, player_ids: list[str] = Form(None)):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-
-    raw_ids = player_ids or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-
-    cleaned_ids = []
-    for value in raw_ids:
-        try:
-            cleaned_ids.append(int(str(value).strip()))
-        except Exception:
-            pass
-
-    if not cleaned_ids:
-        return RedirectResponse("/?tab=database", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM players WHERE id = ANY(%s)", (cleaned_ids,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
-
-    return RedirectResponse("/?tab=database", status_code=303)
 
 
 @app.post("/save-all-objectives")
@@ -2115,7 +2067,41 @@ def delete_new_player(player_id: int, request: Request):
 
 
 
-@app.post("/new-players/bulk-to-preselection")
+@app.post("/new-players/bulk-delete")
+def bulk_delete_new_players(request: Request, new_player_ids: list[str] = Form(None)):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+
+    raw_ids = new_player_ids or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+
+    cleaned_ids = []
+    for value in raw_ids:
+        try:
+            cleaned_ids.append(int(str(value).strip()))
+        except Exception:
+            pass
+
+    if not cleaned_ids:
+        return RedirectResponse("/?tab=newplayers", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM new_players WHERE id = ANY(%s)", (cleaned_ids,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=newplayers", status_code=303)
+
+
+@app.post("/new-player/bulk-to-preselection")
 def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str] = Form(None)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
