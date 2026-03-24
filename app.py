@@ -249,130 +249,6 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 SCRIPT = """
 <script>
 function normalizeText(v){return (v||'').toLowerCase().trim();}
-function showQuickToast(message){
- let toast=document.getElementById('quickActionToast');
- if(!toast){
-   toast=document.createElement('div');
-   toast.id='quickActionToast';
-   toast.style.position='fixed';
-   toast.style.right='20px';
-   toast.style.bottom='20px';
-   toast.style.zIndex='9999';
-   toast.style.background='#0f172a';
-   toast.style.color='white';
-   toast.style.padding='10px 14px';
-   toast.style.borderRadius='12px';
-   toast.style.boxShadow='0 10px 30px rgba(15,23,42,0.25)';
-   toast.style.fontWeight='600';
-   toast.style.opacity='0';
-   toast.style.transition='opacity .2s ease';
-   document.body.appendChild(toast);
- }
- toast.textContent=message;
- toast.style.opacity='1';
- clearTimeout(window.__quickToastTimer);
- window.__quickToastTimer=setTimeout(()=>{ toast.style.opacity='0'; }, 1400);
-}
-function getSubmitAction(form, submitter){
- const raw=(submitter && submitter.getAttribute('formaction')) || form.getAttribute('action') || window.location.pathname;
- try{ return new URL(raw, window.location.origin).pathname; }catch(e){ return raw; }
-}
-function shouldHandleQuickAction(form, submitter){
- const method=((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'get').toLowerCase();
- if(method!=='post') return false;
- const action=getSubmitAction(form, submitter);
- if(/^\/decision\/\d+$/.test(action)) return true;
- if(/^\/delete-player\/\d+$/.test(action)) return true;
- if(/^\/update\/\d+$/.test(action)) return true;
- if(/^\/prepare-draftday\/\d+$/.test(action)) return true;
- if(/^\/remove-objective\/\d+$/.test(action)) return true;
- if(/^\/bulk-objective$/.test(action)) return true;
- if(/^\/new-player\/\d+$/.test(action)) return true;
- if(/^\/new-player\/delete\/\d+$/.test(action)) return true;
- if(/^\/new-player\/to-preselection\/\d+$/.test(action)) return true;
- if(/^\/new-player\/bulk-to-preselection$/.test(action)) return true;
- if(/^\/new-players\/bulk-delete$/.test(action)) return true;
- return false;
-}
-function removeClosestRow(node){
- const row=node ? node.closest('tr[data-player-row="1"]') : null;
- if(row) row.remove();
- if(typeof filterRows==='function') filterRows();
- if(typeof refreshDraftdayEmptyState==='function') refreshDraftdayEmptyState();
-}
-function clearCheckedRows(form, selector){
- form.querySelectorAll(selector).forEach((el)=>{ el.checked=false; });
- const selectAll=document.getElementById('selectAllPlayers');
- if(selectAll) selectAll.checked=false;
- const selectObj=document.getElementById('selectAllObjectives');
- if(selectObj) selectObj.checked=false;
-}
-async function handleQuickSubmit(event){
- const form=event.target;
- const submitter=event.submitter || null;
- if(!form || !shouldHandleQuickAction(form, submitter)) return;
- event.preventDefault();
- const action=getSubmitAction(form, submitter);
- const method=((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'post').toUpperCase();
- const fd=new FormData(form);
- if(submitter && submitter.name) fd.set(submitter.name, submitter.value || '');
- fd.set('ajax','1');
- const originalText=submitter ? submitter.innerHTML : '';
- if(submitter){ submitter.disabled=true; submitter.innerHTML='Guardando...'; }
- try{
-   const res=await fetch(action,{method,body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}});
-   const contentType=res.headers.get('content-type') || '';
-   let data={ok:res.ok};
-   if(contentType.includes('application/json')){
-     data=await res.json();
-   }else if(res.redirected){
-     window.location.href=res.url;
-     return;
-   }
-   if(!res.ok || data.ok===false){
-     window.location.reload();
-     return;
-   }
-   if(typeof updateDraftdayUi==='function' && data) updateDraftdayUi(data);
-   if(/^\/delete-player\/\d+$/.test(action) || /^\/new-player\/delete\/\d+$/.test(action) || /^\/remove-objective\/\d+$/.test(action)){
-     removeClosestRow(form);
-     showQuickToast('Hecho');
-   }else if(/^\/new-players\/bulk-delete$/.test(action)){
-     form.querySelectorAll("input[name='new_player_ids']:checked").forEach((box)=>removeClosestRow(box));
-     clearCheckedRows(form, "input[name='new_player_ids']");
-     showQuickToast('Jugadoras eliminadas');
-   }else if(/^\/bulk-objective$/.test(action)){
-     clearCheckedRows(form, "input[name='player_ids']");
-     showQuickToast('Añadidas a preselección');
-   }else if(/^\/new-player\/bulk-to-preselection$/.test(action)){
-     clearCheckedRows(form, "input[name='new_player_ids']");
-     showQuickToast('Añadidas a preselección');
-   }else if(/^\/decision\/\d+$/.test(action)){
-     const status=fd.get('status') || '';
-     if(status==='Objetivo'){
-       if(submitter){ submitter.innerHTML='Añadida'; }
-       showQuickToast('Añadida a preselección');
-     }else{
-       removeClosestRow(form);
-       showQuickToast('Hecho');
-     }
-   }else if(/^\/update\/\d+$/.test(action) || /^\/new-player\/\d+$/.test(action) || /^\/prepare-draftday\/\d+$/.test(action)){
-     if(submitter){ submitter.innerHTML=originalText; }
-     showQuickToast('Guardado');
-   }else if(/^\/new-player\/to-preselection\/\d+$/.test(action)){
-     if(submitter){ submitter.innerHTML='Añadida'; }
-     showQuickToast('Añadida a preselección');
-   }
- }catch(err){
-   window.location.reload();
-   return;
- }finally{
-   if(submitter){
-     submitter.disabled=false;
-     if(submitter.innerHTML==='Guardando...') submitter.innerHTML=originalText;
-   }
- }
-}
 function filterRows(){
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
@@ -446,7 +322,6 @@ function refreshDraftdayEmptyState(){
  }
  if(liveRows.length>0 && empty) empty.remove();
 }
-document.addEventListener('submit', handleQuickSubmit, true);
 document.addEventListener('DOMContentLoaded',()=>{
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
@@ -502,18 +377,6 @@ def get_current_user(request: Request):
 
 def require_user(request: Request):
     return get_current_user(request)
-
-
-def is_async_request(request: Request) -> bool:
-    return request.headers.get("x-requested-with", "").lower() == "xmlhttprequest"
-
-
-def async_ok(request: Request, redirect_to: str, **extra):
-    if is_async_request(request):
-        payload = {"ok": True, "redirect": redirect_to}
-        payload.update(extra)
-        return JSONResponse(payload)
-    return RedirectResponse(redirect_to, status_code=303)
 
 
 def user_allowed_teams(user: dict) -> list[str]:
@@ -821,7 +684,7 @@ def select_team_page(request: Request):
         r.set_cookie(TEAM_COOKIE, allowed[0], httponly=True, samesite="lax", max_age=604800)
         return r
     if not allowed:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/?tab=database", status_code=303)
 
     cards = "".join([
         f"<div class='team-card'><img class='team-logo' src='{TEAM_IMAGES.get(team, '')}' alt='{team}'><h2>{team}</h2><div class='muted' style='margin-bottom:12px;'>Entrar al tablero de {team}</div><form action='/select-team' method='post'><input type='hidden' name='team' value='{team}'><button type='submit'>Entrar en {team}</button></form></div>"
@@ -1550,7 +1413,7 @@ def bulk_objective(request: Request, player_ids: list[str] = Form(None)):
         cur.close()
         conn.close()
 
-    return async_ok(request, "/?tab=objectives")
+    return RedirectResponse("/?tab=objectives", status_code=303)
 
 
 @app.post("/save-all-objectives")
@@ -1606,7 +1469,7 @@ async def save_all_objectives(request: Request):
         cur.close()
         conn.close()
 
-    return async_ok(request, "/?tab=objectives")
+    return RedirectResponse("/?tab=objectives", status_code=303)
 
 
 @app.post("/draftday-state")
@@ -1785,7 +1648,7 @@ async def prepare_draftday(player_id: int, request: Request):
         cur.close()
         conn.close()
 
-    return async_ok(request, "/?tab=objectives")
+    return RedirectResponse("/?tab=objectives", status_code=303)
 
 
 @app.post("/remove-objective/{player_id}")
@@ -1990,7 +1853,7 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
     conn.commit()
     cur.close()
     conn.close()
-    return async_ok(request, "/")
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/delete-player/{player_id}")
@@ -2007,7 +1870,7 @@ def delete_player(player_id: int, request: Request):
     finally:
         cur.close()
         conn.close()
-    return async_ok(request, "/?tab=database")
+    return RedirectResponse("/?tab=database", status_code=303)
 
 
 @app.post("/import")
@@ -2208,7 +2071,7 @@ def save_new_player(player_id: int, request: Request, dorsal: str = Form(""), na
     conn.commit()
     cur.close()
     conn.close()
-    return async_ok(request, f"/new-player/{player_id}")
+    return RedirectResponse(f"/new-player/{player_id}", status_code=303)
 
 
 @app.post("/new-player/delete/{player_id}")
@@ -2225,7 +2088,7 @@ def delete_new_player(player_id: int, request: Request):
     finally:
         cur.close()
         conn.close()
-    return async_ok(request, "/?tab=newplayers")
+    return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
 
@@ -2246,7 +2109,7 @@ def bulk_delete_new_players(request: Request, new_player_ids: list[str] = Form(N
             pass
 
     if not cleaned_ids:
-        return async_ok(request, "/?tab=newplayers")
+        return RedirectResponse("/?tab=newplayers", status_code=303)
 
     conn = get_conn()
     cur = conn.cursor()
@@ -2260,7 +2123,7 @@ def bulk_delete_new_players(request: Request, new_player_ids: list[str] = Form(N
         cur.close()
         conn.close()
 
-    return async_ok(request, "/?tab=newplayers")
+    return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
 @app.post("/new-player/bulk-to-preselection")
@@ -2283,7 +2146,7 @@ def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str]
             pass
 
     if not cleaned_ids:
-        return async_ok(request, "/?tab=newplayers")
+        return RedirectResponse("/?tab=newplayers", status_code=303)
 
     conn = get_conn()
     cur = conn.cursor()
@@ -2305,7 +2168,7 @@ def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str]
     finally:
         cur.close()
         conn.close()
-    return async_ok(request, "/?tab=objectives")
+    return RedirectResponse("/?tab=objectives", status_code=303)
 
 
 @app.post("/new-player/to-preselection/{player_id}")
@@ -2321,7 +2184,7 @@ def new_player_to_preselection(player_id: int, request: Request):
     row = cur.fetchone()
     if not row:
         cur.close(); conn.close()
-        return async_ok(request, "/?tab=newplayers")
+        return RedirectResponse("/?tab=newplayers", status_code=303)
     dorsal, name, position, club, notes = row
     player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
     try:
