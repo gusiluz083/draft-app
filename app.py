@@ -886,7 +886,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
                 "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' formmethod='post' name='status' value='Objetivo'>Añadir a Draft Day</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
-                "<a class='btn' href='/export?tab=objectives'>Exportar Excel</a>"
+                "<a class='btn btn-light' href='/export?tab=objectives'>Exportar Excel</a>"
                 "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear toda la preselección de este equipo?')\">Reset preselección</button>"
                 "</div>"
             )
