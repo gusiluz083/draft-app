@@ -207,13 +207,10 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .team-card { border:1px solid #dbe3ef; border-radius:16px; padding:18px; background:#f8fbff; text-align:center; transition:transform .15s ease, box-shadow .15s ease; }
 .team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,23,42,0.10); }
 .team-logo { width: 160px; height: 160px; object-fit: contain; display:block; margin: 0 auto 14px; border-radius: 16px; background: white; padding: 8px; border: 1px solid #e5e7eb; }
-.tabs { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px; align-items:center; }
-.tab { padding:12px 18px; border-radius:14px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; border:1px solid #d7e0ea; box-shadow:0 2px 8px rgba(15,23,42,0.05); transition:all .15s ease; }
-.tab:hover { transform:translateY(-1px); box-shadow:0 8px 18px rgba(15,23,42,0.08); }
-.tab.active { background:#2563eb; color:white; border-color:#2563eb; }
+.tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+.tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
+.tab.active { background:#2563eb; color:white; }
 .topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
-.draftday-actions { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-.draftday-actions .btn { padding:11px 16px; border-radius:14px; box-shadow:0 2px 8px rgba(15,23,42,0.06); }
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -445,20 +442,11 @@ def get_team_counts(board_team: str):
     cur = conn.cursor()
     cur.execute(
         '''
-        SELECT
-            CASE
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('portera','portero','gk') THEN 'Portera'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('defensa','def','df','cierre') THEN 'Defensa'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('medio','mediocentro','centrocampista','mc','ala') THEN 'Medio'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('delantera','delantero','dc','pivot','pivote','punta') THEN 'Delantera'
-                ELSE TRIM(COALESCE(p.position,''))
-            END AS pos_norm,
-            COUNT(*)
+        SELECT p.position, COUNT(*)
         FROM team_player_decisions d
         JOIN players p ON p.id = d.player_id
-        WHERE d.board_team=%s
-          AND LOWER(TRIM(COALESCE(d.status,'')))='elegida'
-        GROUP BY pos_norm
+        WHERE d.board_team=%s AND d.status='Elegida'
+        GROUP BY p.position
         ''',
         (board_team,),
     )
@@ -470,7 +458,6 @@ def get_team_counts(board_team: str):
         "Defensa": counts.get("Defensa", 0),
         "Medio": counts.get("Medio", 0),
         "Delantera": counts.get("Delantera", 0),
-        "Total": counts.get("Portera", 0) + counts.get("Defensa", 0) + counts.get("Medio", 0) + counts.get("Delantera", 0),
     }
 
 
@@ -738,22 +725,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             FROM new_players
             ORDER BY id DESC, name ASC
         """
-        try:
-            cur.execute(sql)
-            players = cur.fetchall()
-        except Exception:
-            conn.rollback()
-            fallback_sql = """
-                SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(notes,'')
-                FROM new_players
-                ORDER BY id DESC, name ASC
-            """
-            try:
-                cur.execute(fallback_sql)
-                players = cur.fetchall()
-            except Exception:
-                conn.rollback()
-                players = []
+        cur.execute(sql)
+        players = cur.fetchall()
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
@@ -820,7 +793,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</tr></thead><tbody>{rows}</tbody></table>"
             f"{bulk_actions}</form>"
         )
-    else:
+    elif tab in ("objectives", "final"):
         position_pressure = {}
         for _pid, _name, _team, _position, _player_status, _notes, _decision_status, _draft_round, _round_order in players:
             position_pressure[_position] = position_pressure.get(_position, 0) + 1
@@ -1036,7 +1009,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='stat'><div class='muted'>Defensas</div><div id='dd-count-defensa' class='stat-number'>{team_counts['Defensa']}</div></div>"
             f"<div class='stat'><div class='muted'>Medios</div><div id='dd-count-medio' class='stat-number'>{team_counts['Medio']}</div></div>"
             f"<div class='stat'><div class='muted'>Delanteras</div><div id='dd-count-delantera' class='stat-number'>{team_counts['Delantera']}</div></div>"
-            f"<div class='stat'><div class='muted'>Total</div><div id='dd-count-total' class='stat-number'>{team_counts['Total']}</div></div>"
             f"</div>"
             f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
             f"</div>"
@@ -1185,14 +1157,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "newplayers":
         rows = ""
-        for row in players:
-            if len(row) == 8:
-                pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes = row
-            elif len(row) == 7:
-                pid, dorsal, name, position, estimated_level, fit_level, notes = row
-                scout_status = "Seguimiento"
-            else:
-                continue
+        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
@@ -1984,70 +1949,13 @@ def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(..
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS new_players (
-                id SERIAL PRIMARY KEY,
-                dorsal TEXT,
-                name TEXT NOT NULL,
-                position TEXT,
-                age TEXT,
-                club TEXT,
-                dominant_foot TEXT,
-                estimated_level TEXT,
-                fit_level TEXT,
-                priority_level TEXT,
-                control_skill TEXT,
-                passing_skill TEXT,
-                dribbling_skill TEXT,
-                shooting_skill TEXT,
-                speed_skill TEXT,
-                stamina_skill TEXT,
-                power_skill TEXT,
-                positioning_skill TEXT,
-                tactical_iq TEXT,
-                versatility_skill TEXT,
-                leadership_skill TEXT,
-                character_skill TEXT,
-                exp_f7 TEXT,
-                exp_f11 TEXT,
-                exp_kq TEXT,
-                photo_url TEXT,
-                video1_url TEXT,
-                video2_url TEXT,
-                video3_url TEXT,
-                scout_status TEXT DEFAULT 'Seguimiento',
-                notes TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        for _col, _type in [
-            ("dorsal", "TEXT"),
-            ("position", "TEXT"),
-            ("club", "TEXT"),
-            ("estimated_level", "TEXT"),
-            ("fit_level", "TEXT"),
-            ("scout_status", "TEXT DEFAULT 'Seguimiento'"),
-            ("notes", "TEXT DEFAULT ''"),
-        ]:
-            cur.execute(f"ALTER TABLE new_players ADD COLUMN IF NOT EXISTS {_col} {_type}")
-
-        try:
-            cur.execute(
-                "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
-            )
-        except Exception:
-            conn.rollback()
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO new_players (dorsal, name, position, estimated_level, fit_level, notes) VALUES (%s,%s,%s,%s,%s,%s)",
-                (dorsal.strip(), name.strip(), position.strip(), estimated_level.strip(), fit_level.strip(), notes.strip())
-            )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute(
+        "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
     return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
