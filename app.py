@@ -36,6 +36,7 @@ def get_conn():
         cur = conn.cursor()
         cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_draftday_state (
@@ -86,7 +87,8 @@ def init_db():
             password_hash TEXT NOT NULL,
             is_admin BOOLEAN DEFAULT FALSE,
             team TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP
         )
         """
     )
@@ -211,18 +213,6 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
 .tab.active { background:#2563eb; color:white; }
 .topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
-.draftday-topbar { background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%); color:white; border-radius:22px; padding:22px 24px; margin-bottom:18px; box-shadow:0 14px 34px rgba(15,23,42,0.18); }
-.draftday-topbar h1 { margin-bottom:6px; color:white; }
-.draftday-topbar .muted { color:#cbd5e1; }
-.draftday-menu { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-end; }
-.draftday-menu-group { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-.draftday-menu-sep { width:1px; height:30px; background:rgba(255,255,255,0.18); margin:0 2px; }
-.draftday-link { padding:10px 14px; border-radius:999px; text-decoration:none; font-weight:700; font-size:13px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.08); color:#e2e8f0; transition:all .15s ease; }
-.draftday-link:hover { background:rgba(255,255,255,0.14); color:white; }
-.draftday-link.active { background:white; color:#0f172a; border-color:white; box-shadow:0 8px 18px rgba(255,255,255,0.16); }
-.draftday-link.action { background:#2563eb; color:white; border-color:#2563eb; }
-.draftday-link.action.secondary { background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.16); }
-@media (max-width:900px) { .draftday-topbar { padding:18px; } .draftday-menu { justify-content:flex-start; } .draftday-menu-sep { display:none; } }
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -593,7 +583,7 @@ def enhanced_risk_level(picks_remaining, round_order, position, position_pressur
 def list_users_data():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, is_admin, COALESCE(team,''), created_at FROM users ORDER BY username ASC")
+    cur.execute("SELECT id, username, is_admin, COALESCE(team,''), created_at, last_login FROM users ORDER BY username ASC")
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -628,6 +618,16 @@ def login(username: str = Form(...), password: str = Form(...)):
         conn.close()
         if row:
             user_id, db_username = row
+            conn = get_conn()
+            cur = conn.cursor()
+            try:
+                cur.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=%s", (user_id,))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+            finally:
+                cur.close()
+                conn.close()
             r = RedirectResponse("/select-team", status_code=303)
             r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
             return r
@@ -643,6 +643,17 @@ def login(username: str = Form(...), password: str = Form(...)):
     user_id, db_username, password_hash, is_admin_flag, user_team = row
     if password_hash != hash_text(password):
         return RedirectResponse("/login?error=1", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=%s", (user_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
 
     allowed_teams = TEAMS[:] if is_admin_flag else (TEAMS[:] if user_team == "__ALL__" else [t.strip() for t in user_team.split(",") if t.strip() in TEAMS])
     next_path = "/select-team" if (is_admin_flag or len(allowed_teams) > 1) else "/"
@@ -673,7 +684,7 @@ def select_team_page(request: Request):
         r.set_cookie(TEAM_COOKIE, allowed[0], httponly=True, samesite="lax", max_age=604800)
         return r
     if not allowed:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/?tab=database", status_code=303)
 
     cards = "".join([
         f"<div class='team-card'><img class='team-logo' src='{TEAM_IMAGES.get(team, '')}' alt='{team}'><h2>{team}</h2><div class='muted' style='margin-bottom:12px;'>Entrar al tablero de {team}</div><form action='/select-team' method='post'><input type='hidden' name='team' value='{team}'><button type='submit'>Entrar en {team}</button></form></div>"
@@ -983,20 +994,15 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             pick_summary = f"Siguiente {next_pick}"
 
         content = (
-            f"<div class='topbar draftday-topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
-            f"<div class='draftday-menu'>"
-            f"<div class='draftday-menu-group'>"
-            f"<a class='draftday-link' href='/?tab=database'>Jugadoras</a>"
-            f"<a class='draftday-link' href='/?tab=newplayers'>Jugadoras nuevas</a>"
-            f"<a class='draftday-link' href='/?tab=objectives'>Preselección</a>"
-            f"<a class='draftday-link' href='/?tab=final'>Plantilla</a>"
-            f"<a class='draftday-link active' href='/?tab=draftday'>DRAFT DAY</a>"
-            f"</div>"
-            f"<div class='draftday-menu-sep'></div>"
-            f"<div class='draftday-menu-group'>"
-            f"<a class='draftday-link action secondary' href='/select-team'>Cambiar equipo</a>"
-            f"<a class='draftday-link action' href='/logout'>Salir</a>"
-            f"</div></div></div>"
+            f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
+            f"<div class='draftday-actions'>"
+            f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
+            f"<a class='btn btn-secondary' href='/?tab=newplayers'>Jugadoras nuevas</a>"f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
+            f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
+            f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
+            f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
+            f"<a class='btn btn-secondary' href='/logout'>Salir</a>"
+            f"</div></div>"
             f"<div class='card'><h2>Control del draft</h2>"
             f"<form action='/draftday-state' method='post'>"
             f"<div class='grid'>"
@@ -1063,8 +1069,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             team_lock_notice = f"<div class='card'><strong>Equipos asignados:</strong> {html.escape(allowed_text)}.</div>"
     if user["is_admin"]:
         user_rows = ""
-        for uid, uname, is_admin_flag, team_value, created_at in list_users_data():
+        for uid, uname, is_admin_flag, team_value, created_at, last_login in list_users_data():
             created_text = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
+            last_login_text = last_login.strftime("%Y-%m-%d %H:%M") if last_login else "—"
             role_text = "Admin" if is_admin_flag else "Usuario"
             team_text = "Todos" if is_admin_flag else ("Todos los equipos" if team_value == "__ALL__" else (team_value or "Sin equipo"))
             role_options = (
@@ -1097,6 +1104,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<td>{role_text}</td>"
                 f"<td>{team_manage}</td>"
                 f"<td>{created_text}</td>"
+                f"<td>{last_login_text}</td>"
                 f"<td>"
                 f"<form class='inline-form actions-toolbar' action='/users/role/{uid}' method='post'>"
                 f"<select name='is_admin' style='width:110px;padding:6px 8px;'>{role_options}</select>"
@@ -1114,7 +1122,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         if not user_rows:
-            user_rows = "<tr><td colspan='7' class='muted'>No hay usuarios.</td></tr>"
+            user_rows = "<tr><td colspan='8' class='muted'>No hay usuarios.</td></tr>"
 
         admin_box = (
             "<div class='card'><h2>Administración de usuarios</h2>"
@@ -1127,7 +1135,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div><button type='submit'>Crear usuario</button></div>"
             "</form></div>"
             "<div class='table-wrap'><table>"
-            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
+            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Último acceso</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
             f"<tbody>{user_rows}</tbody></table></div>"
             "</div>"
         )
@@ -1185,7 +1193,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
 
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-danger' type='submit' formaction='/new-players/bulk-delete' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar las jugadoras nuevas seleccionadas?')\">Eliminar seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form action='/new-player/bulk-to-preselection' method='post'>"
             f"{bulk_actions}"
@@ -1198,7 +1206,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
@@ -2082,6 +2090,40 @@ def delete_new_player(player_id: int, request: Request):
         conn.close()
     return RedirectResponse("/?tab=newplayers", status_code=303)
 
+
+
+@app.post("/new-players/bulk-delete")
+def bulk_delete_new_players(request: Request, new_player_ids: list[str] = Form(None)):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+
+    raw_ids = new_player_ids or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+
+    cleaned_ids = []
+    for value in raw_ids:
+        try:
+            cleaned_ids.append(int(str(value).strip()))
+        except Exception:
+            pass
+
+    if not cleaned_ids:
+        return RedirectResponse("/?tab=newplayers", status_code=303)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM new_players WHERE id = ANY(%s)", (cleaned_ids,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
 @app.post("/new-player/bulk-to-preselection")
