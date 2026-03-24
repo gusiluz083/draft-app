@@ -86,12 +86,10 @@ def init_db():
             password_hash TEXT NOT NULL,
             is_admin BOOLEAN DEFAULT FALSE,
             team TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_access TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
-    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_access TIMESTAMP")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS players (
@@ -209,13 +207,10 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .team-card { border:1px solid #dbe3ef; border-radius:16px; padding:18px; background:#f8fbff; text-align:center; transition:transform .15s ease, box-shadow .15s ease; }
 .team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,23,42,0.10); }
 .team-logo { width: 160px; height: 160px; object-fit: contain; display:block; margin: 0 auto 14px; border-radius: 16px; background: white; padding: 8px; border: 1px solid #e5e7eb; }
-.tabs { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px; align-items:center; }
-.tab { padding:12px 18px; border-radius:14px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; border:1px solid #d7e0ea; box-shadow:0 2px 8px rgba(15,23,42,0.05); transition:all .15s ease; }
-.tab:hover { transform:translateY(-1px); box-shadow:0 8px 18px rgba(15,23,42,0.08); }
-.tab.active { background:#2563eb; color:white; border-color:#2563eb; }
+.tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+.tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
+.tab.active { background:#2563eb; color:white; }
 .topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
-.draftday-actions { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-.draftday-actions .btn { padding:11px 16px; border-radius:14px; box-shadow:0 2px 8px rgba(15,23,42,0.06); }
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -447,20 +442,11 @@ def get_team_counts(board_team: str):
     cur = conn.cursor()
     cur.execute(
         '''
-        SELECT
-            CASE
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('portera','portero','gk') THEN 'Portera'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('defensa','def','df','cierre') THEN 'Defensa'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('medio','mediocentro','centrocampista','mc','ala') THEN 'Medio'
-                WHEN LOWER(TRIM(COALESCE(p.position,''))) IN ('delantera','delantero','dc','pivot','pivote','punta') THEN 'Delantera'
-                ELSE TRIM(COALESCE(p.position,''))
-            END AS pos_norm,
-            COUNT(*)
+        SELECT p.position, COUNT(*)
         FROM team_player_decisions d
         JOIN players p ON p.id = d.player_id
-        WHERE d.board_team=%s
-          AND LOWER(TRIM(COALESCE(d.status,'')))='elegida'
-        GROUP BY pos_norm
+        WHERE d.board_team=%s AND d.status='Elegida'
+        GROUP BY p.position
         ''',
         (board_team,),
     )
@@ -472,7 +458,6 @@ def get_team_counts(board_team: str):
         "Defensa": counts.get("Defensa", 0),
         "Medio": counts.get("Medio", 0),
         "Delantera": counts.get("Delantera", 0),
-        "Total": counts.get("Portera", 0) + counts.get("Defensa", 0) + counts.get("Medio", 0) + counts.get("Delantera", 0),
     }
 
 
@@ -631,14 +616,6 @@ def login(username: str = Form(...), password: str = Form(...)):
         conn.close()
         if row:
             user_id, db_username = row
-            conn2 = get_conn()
-            cur2 = conn2.cursor()
-            try:
-                cur2.execute("UPDATE users SET last_access=CURRENT_TIMESTAMP WHERE id=%s", (user_id,))
-                conn2.commit()
-            finally:
-                cur2.close()
-                conn2.close()
             r = RedirectResponse("/select-team", status_code=303)
             r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
             return r
@@ -654,15 +631,6 @@ def login(username: str = Form(...), password: str = Form(...)):
     user_id, db_username, password_hash, is_admin_flag, user_team = row
     if password_hash != hash_text(password):
         return RedirectResponse("/login?error=1", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("UPDATE users SET last_access=CURRENT_TIMESTAMP WHERE id=%s", (user_id,))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
 
     allowed_teams = TEAMS[:] if is_admin_flag else (TEAMS[:] if user_team == "__ALL__" else [t.strip() for t in user_team.split(",") if t.strip() in TEAMS])
     next_path = "/select-team" if (is_admin_flag or len(allowed_teams) > 1) else "/"
@@ -825,7 +793,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</tr></thead><tbody>{rows}</tbody></table>"
             f"{bulk_actions}</form>"
         )
-    else:
+    elif tab in ("objectives", "final"):
         position_pressure = {}
         for _pid, _name, _team, _position, _player_status, _notes, _decision_status, _draft_round, _round_order in players:
             position_pressure[_position] = position_pressure.get(_position, 0) + 1
@@ -1041,7 +1009,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='stat'><div class='muted'>Defensas</div><div id='dd-count-defensa' class='stat-number'>{team_counts['Defensa']}</div></div>"
             f"<div class='stat'><div class='muted'>Medios</div><div id='dd-count-medio' class='stat-number'>{team_counts['Medio']}</div></div>"
             f"<div class='stat'><div class='muted'>Delanteras</div><div id='dd-count-delantera' class='stat-number'>{team_counts['Delantera']}</div></div>"
-            f"<div class='stat'><div class='muted'>Total</div><div id='dd-count-total' class='stat-number'>{team_counts['Total']}</div></div>"
             f"</div>"
             f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
             f"</div>"
@@ -1079,9 +1046,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             team_lock_notice = f"<div class='card'><strong>Equipos asignados:</strong> {html.escape(allowed_text)}.</div>"
     if user["is_admin"]:
         user_rows = ""
-        for uid, uname, is_admin_flag, team_value, created_at, last_access in list_users_data():
+        for uid, uname, is_admin_flag, team_value, created_at in list_users_data():
             created_text = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
-            last_access_text = last_access.strftime("%Y-%m-%d %H:%M") if last_access else "Nunca"
             role_text = "Admin" if is_admin_flag else "Usuario"
             team_text = "Todos" if is_admin_flag else ("Todos los equipos" if team_value == "__ALL__" else (team_value or "Sin equipo"))
             role_options = (
@@ -1114,7 +1080,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<td>{role_text}</td>"
                 f"<td>{team_manage}</td>"
                 f"<td>{created_text}</td>"
-                f"<td>{last_access_text}</td>"
                 f"<td>"
                 f"<form class='inline-form actions-toolbar' action='/users/role/{uid}' method='post'>"
                 f"<select name='is_admin' style='width:110px;padding:6px 8px;'>{role_options}</select>"
@@ -1132,7 +1097,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         if not user_rows:
-            user_rows = "<tr><td colspan='8' class='muted'>No hay usuarios.</td></tr>"
+            user_rows = "<tr><td colspan='7' class='muted'>No hay usuarios.</td></tr>"
 
         admin_box = (
             "<div class='card'><h2>Administración de usuarios</h2>"
@@ -1145,7 +1110,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div><button type='submit'>Crear usuario</button></div>"
             "</form></div>"
             "<div class='table-wrap'><table>"
-            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Último acceso</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
+            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
             f"<tbody>{user_rows}</tbody></table></div>"
             "</div>"
         )
