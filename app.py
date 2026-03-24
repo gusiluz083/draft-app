@@ -1170,7 +1170,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
-            f"<form action='/new-player/bulk-to-preselection' method='post'>"
+            f"<form action='/new-players/bulk-to-preselection' method='post'>"
             f"{bulk_actions}"
             f"<table><thead><tr>"
             f"<th><input id='selectAllNewPlayers' type='checkbox' onclick='toggleAllRows(this, \\'new_player_ids\\');'></th>"
@@ -2067,7 +2067,7 @@ def delete_new_player(player_id: int, request: Request):
 
 
 
-@app.post("/new-player/bulk-to-preselection")
+@app.post("/new-players/bulk-to-preselection")
 def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str] = Form(None)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
