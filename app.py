@@ -733,7 +733,27 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         cur.execute(sql)
         players = cur.fetchall()
     elif tab == "newplayers":
-        players = []
+        sql = """
+            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
+            FROM new_players
+            ORDER BY id DESC, name ASC
+        """
+        try:
+            cur.execute(sql)
+            players = cur.fetchall()
+        except Exception:
+            conn.rollback()
+            fallback_sql = """
+                SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(notes,'')
+                FROM new_players
+                ORDER BY id DESC, name ASC
+            """
+            try:
+                cur.execute(fallback_sql)
+                players = cur.fetchall()
+            except Exception:
+                conn.rollback()
+                players = []
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
@@ -1165,7 +1185,14 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "newplayers":
         rows = ""
-        for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
+        for row in players:
+            if len(row) == 8:
+                pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes = row
+            elif len(row) == 7:
+                pid, dorsal, name, position, estimated_level, fit_level, notes = row
+                scout_status = "Seguimiento"
+            else:
+                continue
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
@@ -1957,13 +1984,70 @@ def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(..
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-        (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS new_players (
+                id SERIAL PRIMARY KEY,
+                dorsal TEXT,
+                name TEXT NOT NULL,
+                position TEXT,
+                age TEXT,
+                club TEXT,
+                dominant_foot TEXT,
+                estimated_level TEXT,
+                fit_level TEXT,
+                priority_level TEXT,
+                control_skill TEXT,
+                passing_skill TEXT,
+                dribbling_skill TEXT,
+                shooting_skill TEXT,
+                speed_skill TEXT,
+                stamina_skill TEXT,
+                power_skill TEXT,
+                positioning_skill TEXT,
+                tactical_iq TEXT,
+                versatility_skill TEXT,
+                leadership_skill TEXT,
+                character_skill TEXT,
+                exp_f7 TEXT,
+                exp_f11 TEXT,
+                exp_kq TEXT,
+                photo_url TEXT,
+                video1_url TEXT,
+                video2_url TEXT,
+                video3_url TEXT,
+                scout_status TEXT DEFAULT 'Seguimiento',
+                notes TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        for _col, _type in [
+            ("dorsal", "TEXT"),
+            ("position", "TEXT"),
+            ("club", "TEXT"),
+            ("estimated_level", "TEXT"),
+            ("fit_level", "TEXT"),
+            ("scout_status", "TEXT DEFAULT 'Seguimiento'"),
+            ("notes", "TEXT DEFAULT ''"),
+        ]:
+            cur.execute(f"ALTER TABLE new_players ADD COLUMN IF NOT EXISTS {_col} {_type}")
+
+        try:
+            cur.execute(
+                "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
+            )
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO new_players (dorsal, name, position, estimated_level, fit_level, notes) VALUES (%s,%s,%s,%s,%s,%s)",
+                (dorsal.strip(), name.strip(), position.strip(), estimated_level.strip(), fit_level.strip(), notes.strip())
+            )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
