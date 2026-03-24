@@ -1502,12 +1502,12 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         board_newplayers = [{"id": r[0], "name": r[1], "position": r[2], "team": r[3]} for r in cur.fetchall()]
         cur.close()
         conn.close()
-        board_available = json.dumps({"objectives": board_objectives, "final": board_final, "newplayers": board_newplayers}, ensure_ascii=False)
+        board_available = json.dumps({"objectives": board_objectives, "final": board_final, "newplayers": board_newplayers}, ensure_ascii=False).replace("</", "<\/")
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
             f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='card board-card'><h2>Pizarra</h2><div class='muted' style='margin-bottom:12px;'>Libre, con nombres editables y guardado por equipo.</div>"
-            f"<form action='/board/save' method='post'><input type='hidden' id='boardStateInput' name='board_state' value='{html.escape(json.dumps(board_state, ensure_ascii=False))}'><script id='boardAvailableData' type='application/json'>{html.escape(board_available)}</script>"
+            f"<form action='/board/save' method='post'><input type='hidden' id='boardStateInput' name='board_state' value='{html.escape(json.dumps(board_state, ensure_ascii=False))}'><script id='boardAvailableData' type='application/json'>{board_available}</script>"
             f"<div class='board-shell'><div><div class='board-toolbar'><button type='button' class='btn' id='addBoardPlayer'>Añadir jugadora</button><button type='button' class='btn btn-secondary' id='clearBoardPlayers'>Vaciar pizarra</button><button type='submit' class='btn btn-success'>Guardar pizarra</button></div><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div></div><div class='card' style='margin-bottom:0;'><h3 style='margin-bottom:12px;'>Jugadoras en pizarra</h3><div id='boardSideList' class='board-side-list'></div><div id='boardSources'></div></div></div></form></div>"
         )
         return page(content)
