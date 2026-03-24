@@ -1161,8 +1161,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
-                f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
-                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+                f"<button class='btn btn-warning action-btn' type='submit' formaction='/new-player/to-preselection/{pid}' formmethod='post'>Añadir a preselección</button>",
+                f"<button class='btn btn-danger action-btn' type='submit' formaction='/new-player/delete/{pid}' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\">Eliminar</button>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='new_player_ids' value='{pid}'></td><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
