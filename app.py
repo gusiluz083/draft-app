@@ -212,7 +212,38 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
 .tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
 .tab.active { background:#2563eb; color:white; }
-.topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
+
+.topbar { display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:center; padding:18px 22px; border-radius:22px; background:linear-gradient(135deg,#0f172a 0%, #172554 55%, #1e3a8a 100%); box-shadow:0 18px 42px rgba(15,23,42,.16); margin-bottom:16px; }
+.topbar h1 { margin:0; color:#ffffff; letter-spacing:-0.02em; }
+.topbar .muted { color:#c7d2fe; }
+.actions-toolbar, .draftday-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.topbar .actions-toolbar .btn,
+.topbar .draftday-actions .btn,
+.topbar .actions-toolbar a,
+.topbar .draftday-actions a {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-height:40px; padding:0 16px; border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.10); color:#ffffff !important;
+  text-decoration:none; font-weight:700;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
+  transition:transform .15s ease, background .15s ease, border-color .15s ease;
+}
+.topbar .actions-toolbar .btn:hover,
+.topbar .draftday-actions .btn:hover,
+.topbar .actions-toolbar a:hover,
+.topbar .draftday-actions a:hover {
+  transform:translateY(-1px);
+  background:rgba(255,255,255,.18);
+  border-color:rgba(255,255,255,.24);
+}
+.topbar .actions-toolbar .btn-dark,
+.topbar .draftday-actions .btn-dark,
+.topbar .actions-toolbar .active-menu,
+.topbar .draftday-actions .active-menu {
+  background:#ffffff; color:#0f172a !important; border-color:#ffffff;
+}
+
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -1206,7 +1237,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
