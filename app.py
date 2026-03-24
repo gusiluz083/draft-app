@@ -210,17 +210,19 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
 .tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
 .tab.active { background:#2563eb; color:white; }
-.topbar { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; align-items:center; }
-.header-bar { display:flex; justify-content:space-between; align-items:center; gap:18px; flex-wrap:wrap; padding:22px 24px; border-radius:20px; background:linear-gradient(135deg,#ffffff 0%,#f8fbff 100%); border:1px solid #dbe7f5; box-shadow:0 14px 32px rgba(15,23,42,0.08); margin-bottom:18px; }
-.header-brand { display:flex; flex-direction:column; gap:8px; }
-.header-title { margin:0; font-size:42px; line-height:1; letter-spacing:-0.03em; color:#0f172a; }
-.header-user { display:inline-flex; align-items:center; gap:8px; background:#eff6ff; color:#1e3a8a; border:1px solid #bfdbfe; border-radius:999px; padding:8px 12px; font-size:13px; font-weight:700; }
-.header-user strong { color:#0f172a; }
-.header-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
-.header-actions .btn { min-height:42px; padding:0 16px; border-radius:999px; box-shadow:0 6px 16px rgba(37,99,235,0.16); }
-.header-actions .btn-secondary { background:#ffffff; color:#0f172a; border:1px solid #cbd5e1; box-shadow:none; }
-.header-actions .btn-secondary:hover { background:#f8fafc; }
-@media (max-width: 900px) { .header-bar { padding:18px; } .header-title { font-size:34px; } .header-actions { width:100%; justify-content:flex-start; } }
+.topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
+.draftday-topbar { background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%); color:white; border-radius:22px; padding:22px 24px; margin-bottom:18px; box-shadow:0 14px 34px rgba(15,23,42,0.18); }
+.draftday-topbar h1 { margin-bottom:6px; color:white; }
+.draftday-topbar .muted { color:#cbd5e1; }
+.draftday-menu { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-end; }
+.draftday-menu-group { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.draftday-menu-sep { width:1px; height:30px; background:rgba(255,255,255,0.18); margin:0 2px; }
+.draftday-link { padding:10px 14px; border-radius:999px; text-decoration:none; font-weight:700; font-size:13px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.08); color:#e2e8f0; transition:all .15s ease; }
+.draftday-link:hover { background:rgba(255,255,255,0.14); color:white; }
+.draftday-link.active { background:white; color:#0f172a; border-color:white; box-shadow:0 8px 18px rgba(255,255,255,0.16); }
+.draftday-link.action { background:#2563eb; color:white; border-color:#2563eb; }
+.draftday-link.action.secondary { background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.16); }
+@media (max-width:900px) { .draftday-topbar { padding:18px; } .draftday-menu { justify-content:flex-start; } .draftday-menu-sep { display:none; } }
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -981,15 +983,20 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             pick_summary = f"Siguiente {next_pick}"
 
         content = (
-            f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
-            f"<div class='draftday-actions'>"
-            f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
-            f"<a class='btn btn-secondary' href='/?tab=newplayers'>Jugadoras nuevas</a>"f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
-            f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
-            f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
-            f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
-            f"<a class='btn btn-secondary' href='/logout'>Salir</a>"
-            f"</div></div>"
+            f"<div class='topbar draftday-topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
+            f"<div class='draftday-menu'>"
+            f"<div class='draftday-menu-group'>"
+            f"<a class='draftday-link' href='/?tab=database'>Jugadoras</a>"
+            f"<a class='draftday-link' href='/?tab=newplayers'>Jugadoras nuevas</a>"
+            f"<a class='draftday-link' href='/?tab=objectives'>Preselección</a>"
+            f"<a class='draftday-link' href='/?tab=final'>Plantilla</a>"
+            f"<a class='draftday-link active' href='/?tab=draftday'>DRAFT DAY</a>"
+            f"</div>"
+            f"<div class='draftday-menu-sep'></div>"
+            f"<div class='draftday-menu-group'>"
+            f"<a class='draftday-link action secondary' href='/select-team'>Cambiar equipo</a>"
+            f"<a class='draftday-link action' href='/logout'>Salir</a>"
+            f"</div></div></div>"
             f"<div class='card'><h2>Control del draft</h2>"
             f"<form action='/draftday-state' method='post'>"
             f"<div class='grid'>"
@@ -1178,7 +1185,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
 
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-danger' type='submit' formaction='/new-players/bulk-delete' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar las jugadoras nuevas seleccionadas?')\">Eliminar seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form action='/new-player/bulk-to-preselection' method='post'>"
             f"{bulk_actions}"
@@ -1190,8 +1197,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         )
 
         content = (
-            f"<div class='header-bar'><div class='header-brand'><h1 class='header-title'>{board_team}</h1><div class='header-user'>Usuario <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='header-actions'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
+            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
@@ -1209,8 +1216,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         wildcard_box = f"<div class='card'><h2>Wildcard</h2><form action='/wildcard' method='post'><div class='grid-2'><div><label>Nombre jugadora wildcard</label><input name='name' value='{html.escape(wildcard_name)}' placeholder='Escribe el nombre'></div><div style='display:flex;align-items:end;'><button type='submit'>Guardar wildcard</button></div></div></form><div class='note-box' style='margin-top:12px;'><strong>Wildcard actual:</strong> {html.escape(wildcard_name or 'Sin definir')}</div></div>"
 
     content = (
-        f"<div class='header-bar'><div class='header-brand'><h1 class='header-title'>{board_team}</h1><div class='header-user'>Usuario <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='header-actions'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+        f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
+        f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
         f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
@@ -2075,40 +2082,6 @@ def delete_new_player(player_id: int, request: Request):
         conn.close()
     return RedirectResponse("/?tab=newplayers", status_code=303)
 
-
-
-@app.post("/new-players/bulk-delete")
-def bulk_delete_new_players(request: Request, new_player_ids: list[str] = Form(None)):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-
-    raw_ids = new_player_ids or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-
-    cleaned_ids = []
-    for value in raw_ids:
-        try:
-            cleaned_ids.append(int(str(value).strip()))
-        except Exception:
-            pass
-
-    if not cleaned_ids:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM new_players WHERE id = ANY(%s)", (cleaned_ids,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cur.close()
-        conn.close()
-
-    return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
 @app.post("/new-player/bulk-to-preselection")
