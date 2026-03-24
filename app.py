@@ -36,7 +36,6 @@ def get_conn():
         cur = conn.cursor()
         cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_draftday_state (
@@ -87,8 +86,7 @@ def init_db():
             password_hash TEXT NOT NULL,
             is_admin BOOLEAN DEFAULT FALSE,
             team TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -178,6 +176,67 @@ def init_db():
         )
         """
     )
+
+    cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS board_team TEXT")
+    cur.execute("ALTER TABLE new_players ADD COLUMN IF NOT EXISTS board_team TEXT")
+
+    # --- team isolation migration for legacy shared data ---
+    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,'') FROM players WHERE board_team IS NULL ORDER BY id")
+    legacy_players = cur.fetchall()
+    for old_id, p_name, p_team, p_position, p_status, p_notes in legacy_players:
+        cur.execute("SELECT DISTINCT board_team FROM team_player_decisions WHERE player_id=%s ORDER BY board_team", (old_id,))
+        decision_teams = [r[0] for r in cur.fetchall() if r and r[0]]
+        target_teams = decision_teams or TEAMS
+        created_by_team = {}
+        for bt in target_teams:
+            cur.execute(
+                "INSERT INTO players (name, team, position, status, notes, board_team) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                (p_name, p_team, p_position, p_status, p_notes, bt),
+            )
+            created_by_team[bt] = cur.fetchone()[0]
+        for bt, new_id in created_by_team.items():
+            cur.execute("UPDATE team_player_decisions SET player_id=%s WHERE player_id=%s AND board_team=%s", (new_id, old_id, bt))
+        cur.execute("DELETE FROM players WHERE id=%s", (old_id,))
+
+    cur.execute(
+        '''
+        SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(age,''), COALESCE(club,''), COALESCE(dominant_foot,''),
+               COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(priority_level,''), COALESCE(control_skill,''),
+               COALESCE(passing_skill,''), COALESCE(dribbling_skill,''), COALESCE(shooting_skill,''), COALESCE(speed_skill,''),
+               COALESCE(stamina_skill,''), COALESCE(power_skill,''), COALESCE(positioning_skill,''), COALESCE(tactical_iq,''),
+               COALESCE(versatility_skill,''), COALESCE(leadership_skill,''), COALESCE(character_skill,''), COALESCE(exp_f7,''),
+               COALESCE(exp_f11,''), COALESCE(exp_kq,''), COALESCE(photo_url,''), COALESCE(video1_url,''), COALESCE(video2_url,''),
+               COALESCE(video3_url,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
+        FROM new_players
+        WHERE board_team IS NULL
+        ORDER BY id
+        '''
+    )
+    legacy_new_players = cur.fetchall()
+    for row in legacy_new_players:
+        (old_id, dorsal, np_name, np_position, np_age, np_club, np_dominant_foot, np_estimated_level, np_fit_level,
+         np_priority_level, np_control_skill, np_passing_skill, np_dribbling_skill, np_shooting_skill, np_speed_skill,
+         np_stamina_skill, np_power_skill, np_positioning_skill, np_tactical_iq, np_versatility_skill, np_leadership_skill,
+         np_character_skill, np_exp_f7, np_exp_f11, np_exp_kq, np_photo_url, np_video1_url, np_video2_url, np_video3_url,
+         np_scout_status, np_notes) = row
+        for bt in TEAMS:
+            cur.execute(
+                '''
+                INSERT INTO new_players (
+                    dorsal, name, position, age, club, dominant_foot, estimated_level, fit_level, priority_level,
+                    control_skill, passing_skill, dribbling_skill, shooting_skill, speed_skill, stamina_skill, power_skill,
+                    positioning_skill, tactical_iq, versatility_skill, leadership_skill, character_skill, exp_f7, exp_f11,
+                    exp_kq, photo_url, video1_url, video2_url, video3_url, scout_status, notes, board_team
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ''',
+                (dorsal, np_name, np_position, np_age, np_club, np_dominant_foot, np_estimated_level, np_fit_level,
+                 np_priority_level, np_control_skill, np_passing_skill, np_dribbling_skill, np_shooting_skill, np_speed_skill,
+                 np_stamina_skill, np_power_skill, np_positioning_skill, np_tactical_iq, np_versatility_skill, np_leadership_skill,
+                 np_character_skill, np_exp_f7, np_exp_f11, np_exp_kq, np_photo_url, np_video1_url, np_video2_url, np_video3_url,
+                 np_scout_status, np_notes, bt),
+            )
+        cur.execute("DELETE FROM new_players WHERE id=%s", (old_id,))
+
     conn.commit()
     cur.close()
     conn.close()
@@ -212,38 +271,7 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
 .tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
 .tab.active { background:#2563eb; color:white; }
-
-.topbar { display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:center; padding:18px 22px; border-radius:22px; background:linear-gradient(135deg,#0f172a 0%, #172554 55%, #1e3a8a 100%); box-shadow:0 18px 42px rgba(15,23,42,.16); margin-bottom:16px; }
-.topbar h1 { margin:0; color:#ffffff; letter-spacing:-0.02em; }
-.topbar .muted { color:#c7d2fe; }
-.actions-toolbar, .draftday-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-.topbar .actions-toolbar .btn,
-.topbar .draftday-actions .btn,
-.topbar .actions-toolbar a,
-.topbar .draftday-actions a {
-  display:inline-flex; align-items:center; justify-content:center;
-  min-height:40px; padding:0 16px; border-radius:999px;
-  border:1px solid rgba(255,255,255,.14);
-  background:rgba(255,255,255,.10); color:#ffffff !important;
-  text-decoration:none; font-weight:700;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
-  transition:transform .15s ease, background .15s ease, border-color .15s ease;
-}
-.topbar .actions-toolbar .btn:hover,
-.topbar .draftday-actions .btn:hover,
-.topbar .actions-toolbar a:hover,
-.topbar .draftday-actions a:hover {
-  transform:translateY(-1px);
-  background:rgba(255,255,255,.18);
-  border-color:rgba(255,255,255,.24);
-}
-.topbar .actions-toolbar .btn-dark,
-.topbar .draftday-actions .btn-dark,
-.topbar .actions-toolbar .active-menu,
-.topbar .draftday-actions .active-menu {
-  background:#ffffff; color:#0f172a !important; border-color:#ffffff;
-}
-
+.topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -439,7 +467,7 @@ def get_team(request: Request):
 def get_stats(board_team: str):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM players")
+    cur.execute("SELECT COUNT(*) FROM players WHERE board_team=%s", (board_team,))
     total = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM team_player_decisions WHERE board_team=%s AND status='Objetivo'", (board_team,))
     objetivos = cur.fetchone()[0]
@@ -614,7 +642,7 @@ def enhanced_risk_level(picks_remaining, round_order, position, position_pressur
 def list_users_data():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, is_admin, COALESCE(team,''), created_at, last_login FROM users ORDER BY username ASC")
+    cur.execute("SELECT id, username, is_admin, COALESCE(team,''), created_at FROM users ORDER BY username ASC")
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -649,16 +677,6 @@ def login(username: str = Form(...), password: str = Form(...)):
         conn.close()
         if row:
             user_id, db_username = row
-            conn = get_conn()
-            cur = conn.cursor()
-            try:
-                cur.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=%s", (user_id,))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-            finally:
-                cur.close()
-                conn.close()
             r = RedirectResponse("/select-team", status_code=303)
             r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
             return r
@@ -674,17 +692,6 @@ def login(username: str = Form(...), password: str = Form(...)):
     user_id, db_username, password_hash, is_admin_flag, user_team = row
     if password_hash != hash_text(password):
         return RedirectResponse("/login?error=1", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=%s", (user_id,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
 
     allowed_teams = TEAMS[:] if is_admin_flag else (TEAMS[:] if user_team == "__ALL__" else [t.strip() for t in user_team.split(",") if t.strip() in TEAMS])
     next_path = "/select-team" if (is_admin_flag or len(allowed_teams) > 1) else "/"
@@ -715,7 +722,7 @@ def select_team_page(request: Request):
         r.set_cookie(TEAM_COOKIE, allowed[0], httponly=True, samesite="lax", max_age=604800)
         return r
     if not allowed:
-        return RedirectResponse("/?tab=database", status_code=303)
+        return RedirectResponse("/", status_code=303)
 
     cards = "".join([
         f"<div class='team-card'><img class='team-logo' src='{TEAM_IMAGES.get(team, '')}' alt='{team}'><h2>{team}</h2><div class='muted' style='margin-bottom:12px;'>Entrar al tablero de {team}</div><form action='/select-team' method='post'><input type='hidden' name='team' value='{team}'><button type='submit'>Entrar en {team}</button></form></div>"
@@ -769,17 +776,19 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         sql = f"""
             SELECT id, name, team, position, status, COALESCE(notes,'')
             FROM players
+            WHERE board_team = %s
             ORDER BY {sort} {order_sql}
         """
-        cur.execute(sql)
+        cur.execute(sql, (board_team,))
         players = cur.fetchall()
     elif tab == "newplayers":
         sql = """
             SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
             FROM new_players
+            WHERE board_team = %s
             ORDER BY id DESC, name ASC
         """
-        cur.execute(sql)
+        cur.execute(sql, (board_team,))
         players = cur.fetchall()
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
@@ -886,7 +895,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
                 "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' formmethod='post' name='status' value='Objetivo'>Añadir a Draft Day</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
-                "<a class='btn btn-light' href='/export?tab=objectives'>Exportar Excel</a>"
                 "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear toda la preselección de este equipo?')\">Reset preselección</button>"
                 "</div>"
             )
@@ -1101,9 +1109,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             team_lock_notice = f"<div class='card'><strong>Equipos asignados:</strong> {html.escape(allowed_text)}.</div>"
     if user["is_admin"]:
         user_rows = ""
-        for uid, uname, is_admin_flag, team_value, created_at, last_login in list_users_data():
+        for uid, uname, is_admin_flag, team_value, created_at in list_users_data():
             created_text = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
-            last_login_text = last_login.strftime("%Y-%m-%d %H:%M") if last_login else "—"
             role_text = "Admin" if is_admin_flag else "Usuario"
             team_text = "Todos" if is_admin_flag else ("Todos los equipos" if team_value == "__ALL__" else (team_value or "Sin equipo"))
             role_options = (
@@ -1136,7 +1143,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<td>{role_text}</td>"
                 f"<td>{team_manage}</td>"
                 f"<td>{created_text}</td>"
-                f"<td>{last_login_text}</td>"
                 f"<td>"
                 f"<form class='inline-form actions-toolbar' action='/users/role/{uid}' method='post'>"
                 f"<select name='is_admin' style='width:110px;padding:6px 8px;'>{role_options}</select>"
@@ -1154,7 +1160,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         if not user_rows:
-            user_rows = "<tr><td colspan='8' class='muted'>No hay usuarios.</td></tr>"
+            user_rows = "<tr><td colspan='7' class='muted'>No hay usuarios.</td></tr>"
 
         admin_box = (
             "<div class='card'><h2>Administración de usuarios</h2>"
@@ -1167,7 +1173,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div><button type='submit'>Crear usuario</button></div>"
             "</form></div>"
             "<div class='table-wrap'><table>"
-            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Último acceso</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
+            "<thead><tr><th>Usuario</th><th>Rol actual</th><th>Equipo</th><th>Creado</th><th>Cambiar rol</th><th>Nueva contraseña</th><th>Acción</th></tr></thead>"
             f"<tbody>{user_rows}</tbody></table></div>"
             "</div>"
         )
@@ -1190,7 +1196,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div style='margin-top:12px;'><label>Notas</label><textarea name='notes'></textarea></div>"
             "<div style='margin-top:12px;'><button type='submit'>Añadir jugadora</button></div>"
             "</form></div>"
-            "<div class='card'><h2>Importar CSV</h2><form action='/import' method='post' enctype='multipart/form-data'><label>Archivo CSV</label><input type='file' name='file' accept='.csv' required><div style='margin-top:12px;'><button type='submit'>Importar CSV</button></div></form><div class='muted' style='margin-top:10px;'>La base de datos es común para PILARES, MADAM y COLS.</div></div></div>"
+            "<div class='card'><h2>Importar CSV</h2><form action='/import' method='post' enctype='multipart/form-data'><label>Archivo CSV</label><input type='file' name='file' accept='.csv' required><div style='margin-top:12px;'><button type='submit'>Importar CSV</button></div></form><div class='muted' style='margin-top:10px;'>La base de datos está separada por equipo: cada equipo solo ve su propia información.</div></div></div>"
         )
 
     if tab == "newplayers":
@@ -1225,7 +1231,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
 
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-danger' type='submit' formaction='/new-players/bulk-delete' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar las jugadoras nuevas seleccionadas?')\">Eliminar seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form action='/new-player/bulk-to-preselection' method='post'>"
             f"{bulk_actions}"
@@ -1238,12 +1244,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
-        f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
-            f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
-            
+            f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
             f"{add_box}"
             f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
             f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, dorsal, posición, notas'></div>"
@@ -1259,10 +1263,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+        f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
-        
+        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
         f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
@@ -1389,9 +1393,12 @@ def delete_user(user_id: int, request: Request):
 def add(request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s)", (name.strip(), team.strip(), position.strip(), status, notes.strip()))
+    cur.execute("INSERT INTO players (name, team, position, status, notes, board_team) VALUES (%s,%s,%s,%s,%s,%s)", (name.strip(), team.strip(), position.strip(), status, notes.strip(), board_team))
     conn.commit()
     cur.close()
     conn.close()
@@ -1848,9 +1855,12 @@ def save_wildcard(request: Request, name: str = Form("")):
 def edit_page(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,'') FROM players WHERE id=%s", (player_id,))
+    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,'') FROM players WHERE id=%s AND board_team=%s", (player_id, board_team))
     row = cur.fetchone()
     cur.close()
     conn.close()
@@ -1881,9 +1891,12 @@ def edit_page(player_id: int, request: Request):
 def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s WHERE id=%s", (name.strip(), team.strip(), position.strip(), status, notes.strip(), player_id))
+    cur.execute("UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s WHERE id=%s AND board_team=%s", (name.strip(), team.strip(), position.strip(), status, notes.strip(), player_id, board_team))
     conn.commit()
     cur.close()
     conn.close()
@@ -1894,10 +1907,13 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
 def delete_player(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM players WHERE id=%s", (player_id,))
+        cur.execute("DELETE FROM players WHERE id=%s AND board_team=%s", (player_id, board_team))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -1911,6 +1927,9 @@ def delete_player(player_id: int, request: Request):
 def import_csv(request: Request, file: UploadFile = File(...)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     reader = csv.DictReader(file.file.read().decode("utf-8-sig").splitlines())
     conn = get_conn()
     cur = conn.cursor()
@@ -1921,7 +1940,7 @@ def import_csv(request: Request, file: UploadFile = File(...)):
         status = (row.get("status") or row.get("estado") or "Disponible").strip() or "Disponible"
         notes = (row.get("notes") or row.get("notas") or "").strip()
         if name:
-            cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s)", (name, team, position, status, notes))
+            cur.execute("INSERT INTO players (name, team, position, status, notes, board_team) VALUES (%s,%s,%s,%s,%s,%s)", (name, team, position, status, notes, board_team))
     conn.commit()
     cur.close()
     conn.close()
@@ -1939,7 +1958,7 @@ def export_excel(request: Request, tab: str = "database"):
     conn = get_conn()
     cur = conn.cursor()
     if tab == "database":
-        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players ORDER BY id DESC")
+        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players WHERE board_team=%s ORDER BY id DESC", (board_team,))
         rows = cur.fetchall()
         headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
     else:
@@ -2006,11 +2025,14 @@ def ensure_admin():
 def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), club: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-        (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
+        "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes, board_team) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip(), board_team)
     )
     conn.commit()
     cur.close()
@@ -2022,9 +2044,12 @@ def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(..
 def new_player_page(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(age,''), COALESCE(club,''), COALESCE(dominant_foot,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(priority_level,''), COALESCE(control_skill,''), COALESCE(passing_skill,''), COALESCE(dribbling_skill,''), COALESCE(shooting_skill,''), COALESCE(speed_skill,''), COALESCE(stamina_skill,''), COALESCE(power_skill,''), COALESCE(positioning_skill,''), COALESCE(tactical_iq,''), COALESCE(versatility_skill,''), COALESCE(leadership_skill,''), COALESCE(character_skill,''), COALESCE(exp_f7,''), COALESCE(exp_f11,''), COALESCE(exp_kq,''), COALESCE(photo_url,''), COALESCE(video1_url,''), COALESCE(video2_url,''), COALESCE(video3_url,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+    cur.execute("SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(age,''), COALESCE(club,''), COALESCE(dominant_foot,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(priority_level,''), COALESCE(control_skill,''), COALESCE(passing_skill,''), COALESCE(dribbling_skill,''), COALESCE(shooting_skill,''), COALESCE(speed_skill,''), COALESCE(stamina_skill,''), COALESCE(power_skill,''), COALESCE(positioning_skill,''), COALESCE(tactical_iq,''), COALESCE(versatility_skill,''), COALESCE(leadership_skill,''), COALESCE(character_skill,''), COALESCE(exp_f7,''), COALESCE(exp_f11,''), COALESCE(exp_kq,''), COALESCE(photo_url,''), COALESCE(video1_url,''), COALESCE(video2_url,''), COALESCE(video3_url,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'') FROM new_players WHERE id=%s AND board_team=%s", (player_id, board_team))
     row = cur.fetchone()
     cur.close()
     conn.close()
@@ -2098,10 +2123,13 @@ def new_player_page(player_id: int, request: Request):
 def save_new_player(player_id: int, request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), age: str = Form(""), club: str = Form(""), dominant_foot: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), priority_level: str = Form(""), control_skill: str = Form(""), passing_skill: str = Form(""), dribbling_skill: str = Form(""), shooting_skill: str = Form(""), speed_skill: str = Form(""), stamina_skill: str = Form(""), power_skill: str = Form(""), positioning_skill: str = Form(""), tactical_iq: str = Form(""), versatility_skill: str = Form(""), leadership_skill: str = Form(""), character_skill: str = Form(""), exp_f7: str = Form(""), exp_f11: str = Form(""), exp_kq: str = Form(""), photo_url: str = Form(""), video1_url: str = Form(""), video2_url: str = Form(""), video3_url: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE new_players SET dorsal=%s, name=%s, position=%s, age=%s, club=%s, dominant_foot=%s, estimated_level=%s, fit_level=%s, priority_level=%s, control_skill=%s, passing_skill=%s, dribbling_skill=%s, shooting_skill=%s, speed_skill=%s, stamina_skill=%s, power_skill=%s, positioning_skill=%s, tactical_iq=%s, versatility_skill=%s, leadership_skill=%s, character_skill=%s, exp_f7=%s, exp_f11=%s, exp_kq=%s, photo_url=%s, video1_url=%s, video2_url=%s, video3_url=%s, scout_status=%s, notes=%s WHERE id=%s",
-        (dorsal.strip(), name.strip(), position.strip(), age.strip(), club.strip(), dominant_foot.strip(), estimated_level.strip(), fit_level.strip(), priority_level.strip(), control_skill.strip(), passing_skill.strip(), dribbling_skill.strip(), shooting_skill.strip(), speed_skill.strip(), stamina_skill.strip(), power_skill.strip(), positioning_skill.strip(), tactical_iq.strip(), versatility_skill.strip(), leadership_skill.strip(), character_skill.strip(), exp_f7.strip(), exp_f11.strip(), exp_kq.strip(), photo_url.strip(), video1_url.strip(), video2_url.strip(), video3_url.strip(), scout_status.strip(), notes.strip(), player_id))
+    cur.execute("UPDATE new_players SET dorsal=%s, name=%s, position=%s, age=%s, club=%s, dominant_foot=%s, estimated_level=%s, fit_level=%s, priority_level=%s, control_skill=%s, passing_skill=%s, dribbling_skill=%s, shooting_skill=%s, speed_skill=%s, stamina_skill=%s, power_skill=%s, positioning_skill=%s, tactical_iq=%s, versatility_skill=%s, leadership_skill=%s, character_skill=%s, exp_f7=%s, exp_f11=%s, exp_kq=%s, photo_url=%s, video1_url=%s, video2_url=%s, video3_url=%s, scout_status=%s, notes=%s WHERE id=%s AND board_team=%s",
+        (dorsal.strip(), name.strip(), position.strip(), age.strip(), club.strip(), dominant_foot.strip(), estimated_level.strip(), fit_level.strip(), priority_level.strip(), control_skill.strip(), passing_skill.strip(), dribbling_skill.strip(), shooting_skill.strip(), speed_skill.strip(), stamina_skill.strip(), power_skill.strip(), positioning_skill.strip(), tactical_iq.strip(), versatility_skill.strip(), leadership_skill.strip(), character_skill.strip(), exp_f7.strip(), exp_f11.strip(), exp_kq.strip(), photo_url.strip(), video1_url.strip(), video2_url.strip(), video3_url.strip(), scout_status.strip(), notes.strip(), player_id, board_team))
     conn.commit()
     cur.close()
     conn.close()
@@ -2112,10 +2140,13 @@ def save_new_player(player_id: int, request: Request, dorsal: str = Form(""), na
 def delete_new_player(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM new_players WHERE id=%s", (player_id,))
+        cur.execute("DELETE FROM new_players WHERE id=%s AND board_team=%s", (player_id, board_team))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -2124,40 +2155,6 @@ def delete_new_player(player_id: int, request: Request):
         conn.close()
     return RedirectResponse("/?tab=newplayers", status_code=303)
 
-
-
-@app.post("/new-players/bulk-delete")
-def bulk_delete_new_players(request: Request, new_player_ids: list[str] = Form(None)):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-
-    raw_ids = new_player_ids or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-
-    cleaned_ids = []
-    for value in raw_ids:
-        try:
-            cleaned_ids.append(int(str(value).strip()))
-        except Exception:
-            pass
-
-    if not cleaned_ids:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM new_players WHERE id = ANY(%s)", (cleaned_ids,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cur.close()
-        conn.close()
-
-    return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
 @app.post("/new-player/bulk-to-preselection")
@@ -2186,13 +2183,13 @@ def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str]
     cur = conn.cursor()
     try:
         for player_id in cleaned_ids:
-            cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+            cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s AND board_team=%s", (player_id, board_team))
             row = cur.fetchone()
             if not row:
                 continue
             dorsal, name, position, club, notes = row
             player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
-            cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
+            cur.execute("INSERT INTO players (name, team, position, status, notes, board_team) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes, board_team))
             created_player_id = cur.fetchone()[0]
             cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
         conn.commit()
@@ -2214,7 +2211,7 @@ def new_player_to_preselection(player_id: int, request: Request):
         return RedirectResponse("/select-team", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
+    cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s AND board_team=%s", (player_id, board_team))
     row = cur.fetchone()
     if not row:
         cur.close(); conn.close()
@@ -2222,7 +2219,7 @@ def new_player_to_preselection(player_id: int, request: Request):
     dorsal, name, position, club, notes = row
     player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
     try:
-        cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
+        cur.execute("INSERT INTO players (name, team, position, status, notes, board_team) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes, board_team))
         created_player_id = cur.fetchone()[0]
         cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
         conn.commit()
