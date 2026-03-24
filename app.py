@@ -57,10 +57,12 @@ def get_conn():
                 id SERIAL PRIMARY KEY,
                 board_team TEXT NOT NULL UNIQUE,
                 board_json TEXT NOT NULL DEFAULT '[]',
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by TEXT DEFAULT ''
             )
             """
         )
+        cur.execute("ALTER TABLE team_board_state ADD COLUMN IF NOT EXISTS updated_by TEXT DEFAULT ''")
         conn.commit()
         cur.close()
     except Exception:
@@ -212,20 +214,23 @@ init_db()
 def get_team_board_state(board_team: str):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT board_json FROM team_board_state WHERE board_team = %s", (board_team,))
+    cur.execute("SELECT board_json, updated_at, COALESCE(updated_by, '') FROM team_board_state WHERE board_team = %s", (board_team,))
     row = cur.fetchone()
     cur.close()
     conn.close()
-    if not row or not row[0]:
-        return []
+    if not row:
+        return [], None, ""
+    board_json, updated_at, updated_by = row
+    if not board_json:
+        return [], updated_at, updated_by
     try:
-        data = json.loads(row[0])
-        return data if isinstance(data, list) else []
+        data = json.loads(board_json)
+        return (data if isinstance(data, list) else []), updated_at, updated_by
     except Exception:
-        return []
+        return [], updated_at, updated_by
 
 
-def save_team_board_state(board_team: str, board_data):
+def save_team_board_state(board_team: str, board_data, updated_by: str = ""):
     safe_items = []
     if isinstance(board_data, list):
         for item in board_data[:40]:
@@ -250,13 +255,14 @@ def save_team_board_state(board_team: str, board_data):
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO team_board_state (board_team, board_json, updated_at)
-        VALUES (%s, %s, CURRENT_TIMESTAMP)
+        INSERT INTO team_board_state (board_team, board_json, updated_at, updated_by)
+        VALUES (%s, %s, CURRENT_TIMESTAMP, %s)
         ON CONFLICT (board_team) DO UPDATE SET
             board_json = EXCLUDED.board_json,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP,
+            updated_by = EXCLUDED.updated_by
         """,
-        (board_team, payload),
+        (board_team, payload, str(updated_by or '')[:120]),
     )
     conn.commit()
     cur.close()
@@ -1466,7 +1472,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         return page(content)
 
     if tab == "board":
-        board_state = get_team_board_state(board_team)
+        board_state, board_updated_at, board_updated_by = get_team_board_state(board_team)
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(
@@ -1503,10 +1509,12 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         cur.close()
         conn.close()
         board_available = json.dumps({"objectives": board_objectives, "final": board_final, "newplayers": board_newplayers}, ensure_ascii=False).replace("</", "<\/")
+        board_updated_at_text = board_updated_at.strftime('%d/%m/%Y %H:%M') if board_updated_at else 'Sin guardar todavía'
+        board_updated_by_text = html.escape(board_updated_by or 'Sin registro')
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
             f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
-            f"<div class='card board-card'><h2>Pizarra</h2><div class='muted' style='margin-bottom:12px;'>Libre, con nombres editables y guardado por equipo.</div>"
+            f"<div class='card board-card'><h2>Pizarra</h2><div class='note-box' style='margin-bottom:12px;'><div><strong>Pizarra compartida del equipo</strong></div><div class='muted' style='margin-top:6px;'>Última actualización: <strong>{board_updated_at_text}</strong></div><div class='muted' style='margin-top:4px;'>Guardado por: <strong>{board_updated_by_text}</strong></div></div>"
             f"<form action='/board/save' method='post'><input type='hidden' id='boardStateInput' name='board_state' value='{html.escape(json.dumps(board_state, ensure_ascii=False))}'><script id='boardAvailableData' type='application/json'>{board_available}</script>"
             f"<div class='board-shell'><div><div class='board-toolbar'><button type='button' class='btn' id='addBoardPlayer'>Añadir jugadora</button><button type='button' class='btn btn-secondary' id='clearBoardPlayers'>Vaciar pizarra</button><button type='submit' class='btn btn-success'>Guardar pizarra</button></div><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div></div><div class='card' style='margin-bottom:0;'><h3 style='margin-bottom:12px;'>Jugadoras en pizarra</h3><div id='boardSideList' class='board-side-list'></div><div id='boardSources'></div></div></div></form></div>"
         )
@@ -1545,7 +1553,7 @@ def board_save(request: Request, board_state: str = Form("[]")):
         data = json.loads(board_state or "[]")
     except Exception:
         data = []
-    save_team_board_state(board_team, data)
+    save_team_board_state(board_team, data, user.get('username', ''))
     return RedirectResponse("/?tab=board", status_code=303)
 
 
