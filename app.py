@@ -212,38 +212,7 @@ button,.btn,a.btn { background:#2563eb; color:white; border:none; cursor:pointer
 .tabs { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
 .tab { padding:10px 14px; border-radius:999px; background:#e2e8f0; color:#0f172a; text-decoration:none; font-weight:700; }
 .tab.active { background:#2563eb; color:white; }
-
-.topbar { display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:center; padding:18px 22px; border-radius:22px; background:linear-gradient(135deg,#0f172a 0%, #172554 55%, #1e3a8a 100%); box-shadow:0 18px 42px rgba(15,23,42,.16); margin-bottom:16px; }
-.topbar h1 { margin:0; color:#ffffff; letter-spacing:-0.02em; }
-.topbar .muted { color:#c7d2fe; }
-.actions-toolbar, .draftday-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-.topbar .actions-toolbar .btn,
-.topbar .draftday-actions .btn,
-.topbar .actions-toolbar a,
-.topbar .draftday-actions a {
-  display:inline-flex; align-items:center; justify-content:center;
-  min-height:40px; padding:0 16px; border-radius:999px;
-  border:1px solid rgba(255,255,255,.14);
-  background:rgba(255,255,255,.10); color:#ffffff !important;
-  text-decoration:none; font-weight:700;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
-  transition:transform .15s ease, background .15s ease, border-color .15s ease;
-}
-.topbar .actions-toolbar .btn:hover,
-.topbar .draftday-actions .btn:hover,
-.topbar .actions-toolbar a:hover,
-.topbar .draftday-actions a:hover {
-  transform:translateY(-1px);
-  background:rgba(255,255,255,.18);
-  border-color:rgba(255,255,255,.24);
-}
-.topbar .actions-toolbar .btn-dark,
-.topbar .draftday-actions .btn-dark,
-.topbar .actions-toolbar .active-menu,
-.topbar .draftday-actions .active-menu {
-  background:#ffffff; color:#0f172a !important; border-color:#ffffff;
-}
-
+.topbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center; }
 .table-wrap { overflow-x:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:white; min-width:1200px; }
 th,td { padding:12px 10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
@@ -280,6 +249,130 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 SCRIPT = """
 <script>
 function normalizeText(v){return (v||'').toLowerCase().trim();}
+function showQuickToast(message){
+ let toast=document.getElementById('quickActionToast');
+ if(!toast){
+   toast=document.createElement('div');
+   toast.id='quickActionToast';
+   toast.style.position='fixed';
+   toast.style.right='20px';
+   toast.style.bottom='20px';
+   toast.style.zIndex='9999';
+   toast.style.background='#0f172a';
+   toast.style.color='white';
+   toast.style.padding='10px 14px';
+   toast.style.borderRadius='12px';
+   toast.style.boxShadow='0 10px 30px rgba(15,23,42,0.25)';
+   toast.style.fontWeight='600';
+   toast.style.opacity='0';
+   toast.style.transition='opacity .2s ease';
+   document.body.appendChild(toast);
+ }
+ toast.textContent=message;
+ toast.style.opacity='1';
+ clearTimeout(window.__quickToastTimer);
+ window.__quickToastTimer=setTimeout(()=>{ toast.style.opacity='0'; }, 1400);
+}
+function getSubmitAction(form, submitter){
+ const raw=(submitter && submitter.getAttribute('formaction')) || form.getAttribute('action') || window.location.pathname;
+ try{ return new URL(raw, window.location.origin).pathname; }catch(e){ return raw; }
+}
+function shouldHandleQuickAction(form, submitter){
+ const method=((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'get').toLowerCase();
+ if(method!=='post') return false;
+ const action=getSubmitAction(form, submitter);
+ if(/^\/decision\/\d+$/.test(action)) return true;
+ if(/^\/delete-player\/\d+$/.test(action)) return true;
+ if(/^\/update\/\d+$/.test(action)) return true;
+ if(/^\/prepare-draftday\/\d+$/.test(action)) return true;
+ if(/^\/remove-objective\/\d+$/.test(action)) return true;
+ if(/^\/bulk-objective$/.test(action)) return true;
+ if(/^\/new-player\/\d+$/.test(action)) return true;
+ if(/^\/new-player\/delete\/\d+$/.test(action)) return true;
+ if(/^\/new-player\/to-preselection\/\d+$/.test(action)) return true;
+ if(/^\/new-player\/bulk-to-preselection$/.test(action)) return true;
+ if(/^\/new-players\/bulk-delete$/.test(action)) return true;
+ return false;
+}
+function removeClosestRow(node){
+ const row=node ? node.closest('tr[data-player-row="1"]') : null;
+ if(row) row.remove();
+ if(typeof filterRows==='function') filterRows();
+ if(typeof refreshDraftdayEmptyState==='function') refreshDraftdayEmptyState();
+}
+function clearCheckedRows(form, selector){
+ form.querySelectorAll(selector).forEach((el)=>{ el.checked=false; });
+ const selectAll=document.getElementById('selectAllPlayers');
+ if(selectAll) selectAll.checked=false;
+ const selectObj=document.getElementById('selectAllObjectives');
+ if(selectObj) selectObj.checked=false;
+}
+async function handleQuickSubmit(event){
+ const form=event.target;
+ const submitter=event.submitter || null;
+ if(!form || !shouldHandleQuickAction(form, submitter)) return;
+ event.preventDefault();
+ const action=getSubmitAction(form, submitter);
+ const method=((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'post').toUpperCase();
+ const fd=new FormData(form);
+ if(submitter && submitter.name) fd.set(submitter.name, submitter.value || '');
+ fd.set('ajax','1');
+ const originalText=submitter ? submitter.innerHTML : '';
+ if(submitter){ submitter.disabled=true; submitter.innerHTML='Guardando...'; }
+ try{
+   const res=await fetch(action,{method,body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}});
+   const contentType=res.headers.get('content-type') || '';
+   let data={ok:res.ok};
+   if(contentType.includes('application/json')){
+     data=await res.json();
+   }else if(res.redirected){
+     window.location.href=res.url;
+     return;
+   }
+   if(!res.ok || data.ok===false){
+     window.location.reload();
+     return;
+   }
+   if(typeof updateDraftdayUi==='function' && data) updateDraftdayUi(data);
+   if(/^\/delete-player\/\d+$/.test(action) || /^\/new-player\/delete\/\d+$/.test(action) || /^\/remove-objective\/\d+$/.test(action)){
+     removeClosestRow(form);
+     showQuickToast('Hecho');
+   }else if(/^\/new-players\/bulk-delete$/.test(action)){
+     form.querySelectorAll("input[name='new_player_ids']:checked").forEach((box)=>removeClosestRow(box));
+     clearCheckedRows(form, "input[name='new_player_ids']");
+     showQuickToast('Jugadoras eliminadas');
+   }else if(/^\/bulk-objective$/.test(action)){
+     clearCheckedRows(form, "input[name='player_ids']");
+     showQuickToast('Añadidas a preselección');
+   }else if(/^\/new-player\/bulk-to-preselection$/.test(action)){
+     clearCheckedRows(form, "input[name='new_player_ids']");
+     showQuickToast('Añadidas a preselección');
+   }else if(/^\/decision\/\d+$/.test(action)){
+     const status=fd.get('status') || '';
+     if(status==='Objetivo'){
+       if(submitter){ submitter.innerHTML='Añadida'; }
+       showQuickToast('Añadida a preselección');
+     }else{
+       removeClosestRow(form);
+       showQuickToast('Hecho');
+     }
+   }else if(/^\/update\/\d+$/.test(action) || /^\/new-player\/\d+$/.test(action) || /^\/prepare-draftday\/\d+$/.test(action)){
+     if(submitter){ submitter.innerHTML=originalText; }
+     showQuickToast('Guardado');
+   }else if(/^\/new-player\/to-preselection\/\d+$/.test(action)){
+     if(submitter){ submitter.innerHTML='Añadida'; }
+     showQuickToast('Añadida a preselección');
+   }
+ }catch(err){
+   window.location.reload();
+   return;
+ }finally{
+   if(submitter){
+     submitter.disabled=false;
+     if(submitter.innerHTML==='Guardando...') submitter.innerHTML=originalText;
+   }
+ }
+}
 function filterRows(){
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
@@ -353,6 +446,7 @@ function refreshDraftdayEmptyState(){
  }
  if(liveRows.length>0 && empty) empty.remove();
 }
+document.addEventListener('submit', handleQuickSubmit, true);
 document.addEventListener('DOMContentLoaded',()=>{
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
@@ -408,6 +502,18 @@ def get_current_user(request: Request):
 
 def require_user(request: Request):
     return get_current_user(request)
+
+
+def is_async_request(request: Request) -> bool:
+    return request.headers.get("x-requested-with", "").lower() == "xmlhttprequest"
+
+
+def async_ok(request: Request, redirect_to: str, **extra):
+    if is_async_request(request):
+        payload = {"ok": True, "redirect": redirect_to}
+        payload.update(extra)
+        return JSONResponse(payload)
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 def user_allowed_teams(user: dict) -> list[str]:
@@ -715,7 +821,7 @@ def select_team_page(request: Request):
         r.set_cookie(TEAM_COOKIE, allowed[0], httponly=True, samesite="lax", max_age=604800)
         return r
     if not allowed:
-        return RedirectResponse("/?tab=database", status_code=303)
+        return RedirectResponse("/", status_code=303)
 
     cards = "".join([
         f"<div class='team-card'><img class='team-logo' src='{TEAM_IMAGES.get(team, '')}' alt='{team}'><h2>{team}</h2><div class='muted' style='margin-bottom:12px;'>Entrar al tablero de {team}</div><form action='/select-team' method='post'><input type='hidden' name='team' value='{team}'><button type='submit'>Entrar en {team}</button></form></div>"
@@ -881,17 +987,19 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         save_all = ""
         
         if tab == "objectives":
+            msg_html = ""
+            if request.query_params.get("msg") == "already_selected":
+                msg_html = "<div class='card' style='margin-bottom:12px; border-left:4px solid #f59e0b;'><strong>Jugadora ya preseleccionada</strong></div>"
             bulk_actions = (
                 "<div class='actions-toolbar' style='margin-bottom:12px;'>"
                 "<button class='btn btn-dark' type='submit' formaction='/save-all-objectives'>Guardar todo</button>"
                 "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' formmethod='post' name='status' value='Objetivo'>Añadir a Draft Day</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
-                "<a class='btn btn-light' href='/export?tab=objectives'>Exportar Excel</a>"
                 "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear toda la preselección de este equipo?')\">Reset preselección</button>"
                 "</div>"
             )
 
-            table_html = f"<form method='post'>{bulk_actions}<table><thead><tr><th><input id='selectAllObjectives' type='checkbox' onclick='toggleSelectAllSelected(this)'></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
+            table_html = f"{msg_html}<form method='post'>{bulk_actions}<table><thead><tr><th><input id='selectAllObjectives' type='checkbox' onclick='toggleSelectAllSelected(this)'></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
         else:
             table_html = f"<table><thead><tr><th></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
 
@@ -1238,12 +1346,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
-        f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
-            f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
-            
+            f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
             f"{add_box}"
             f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
             f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, dorsal, posición, notas'></div>"
@@ -1259,10 +1365,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+        f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
-        
+        f"<div class='tabs'><a class='tab {'active' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='tab {'active' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='tab {'active' if tab=='objectives' else ''}' href='/?tab=objectives'>Jugadoras preseleccionadas</a><a class='tab {'active' if tab=='final' else ''}' href='/?tab=final'>Plantilla definitiva</a><a class='tab {'active' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a></div>"
         f"{add_box}{wildcard_box}"
         f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
         f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, equipo, posición, notas'></div>"
@@ -1422,14 +1528,17 @@ def bulk_objective(request: Request, player_ids: list[str] = Form(None)):
 
     conn = get_conn()
     cur = conn.cursor()
+    had_existing_objective = False
     try:
         for player_id in cleaned_ids:
             cur.execute(
-                "SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s",
+                "SELECT id, status FROM team_player_decisions WHERE board_team=%s AND player_id=%s",
                 (board_team, player_id),
             )
             row = cur.fetchone()
             if row:
+                if row[1] == "Objetivo":
+                    had_existing_objective = True
                 cur.execute(
                     "UPDATE team_player_decisions SET status='Objetivo' WHERE board_team=%s AND player_id=%s",
                     (board_team, player_id),
@@ -1447,6 +1556,8 @@ def bulk_objective(request: Request, player_ids: list[str] = Form(None)):
         cur.close()
         conn.close()
 
+    if had_existing_objective:
+        return RedirectResponse("/?tab=objectives&msg=already_selected", status_code=303)
     return RedirectResponse("/?tab=objectives", status_code=303)
 
 
@@ -1503,7 +1614,7 @@ async def save_all_objectives(request: Request):
         cur.close()
         conn.close()
 
-    return RedirectResponse("/?tab=objectives", status_code=303)
+    return async_ok(request, "/?tab=objectives")
 
 
 @app.post("/draftday-state")
@@ -1682,7 +1793,7 @@ async def prepare_draftday(player_id: int, request: Request):
         cur.close()
         conn.close()
 
-    return RedirectResponse("/?tab=objectives", status_code=303)
+    return async_ok(request, "/?tab=objectives")
 
 
 @app.post("/remove-objective/{player_id}")
@@ -1755,10 +1866,14 @@ def set_decision(player_id: int, request: Request, status: str = Form(...), sour
 
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
+    cur.execute("SELECT id, status FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
     row = cur.fetchone()
+    already_selected = False
     if row:
-        cur.execute("UPDATE team_player_decisions SET status=%s WHERE board_team=%s AND player_id=%s", (status, board_team, player_id))
+        if status == "Objetivo" and row[1] == "Objetivo":
+            already_selected = True
+        else:
+            cur.execute("UPDATE team_player_decisions SET status=%s WHERE board_team=%s AND player_id=%s", (status, board_team, player_id))
     else:
         cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,%s)", (board_team, player_id, status))
     conn.commit()
@@ -1786,6 +1901,7 @@ def set_decision(player_id: int, request: Request, status: str = Form(...), sour
             "counts": counts,
             "elegidas": elegidas,
             "targets_remaining": targets_remaining,
+            "message": "Jugadora ya preseleccionada" if already_selected else "",
         })
 
     if source_tab == "draftday":
@@ -1794,444 +1910,9 @@ def set_decision(player_id: int, request: Request, status: str = Form(...), sour
             target += f"&current_round={current_round}"
         return RedirectResponse(target, status_code=303)
 
-    return RedirectResponse("/?tab=objectives", status_code=303)
-    return RedirectResponse("/", status_code=303)
-
-
-@app.post("/round/{player_id}")
-def save_round(player_id: int, request: Request, draft_round: str = Form(""), round_order: str = Form("")):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-    round_value = int(draft_round) if str(draft_round).isdigit() else None
-    order_value = int(round_order) if str(round_order).isdigit() else None
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM team_player_decisions WHERE board_team=%s AND player_id=%s", (board_team, player_id))
-    row = cur.fetchone()
-    if row:
-        cur.execute("UPDATE team_player_decisions SET draft_round=%s, round_order=%s, status='Objetivo' WHERE board_team=%s AND player_id=%s", (round_value, order_value, board_team, player_id))
-    else:
-        cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status, draft_round, round_order) VALUES (%s,%s,'Objetivo',%s,%s)", (board_team, player_id, round_value, order_value))
-    conn.commit()
-    cur.close()
-    conn.close()
+    if already_selected:
+        return RedirectResponse("/?tab=objectives&msg=already_selected", status_code=303)
     return RedirectResponse("/?tab=objectives", status_code=303)
 
 
-@app.post("/wildcard")
-def save_wildcard(request: Request, name: str = Form("")):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
 
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM team_wildcards WHERE board_team=%s", (board_team,))
-    row = cur.fetchone()
-    if row:
-        cur.execute("UPDATE team_wildcards SET name=%s WHERE board_team=%s", (name.strip(), board_team))
-    else:
-        cur.execute("INSERT INTO team_wildcards (board_team, name) VALUES (%s,%s)", (board_team, name.strip()))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return RedirectResponse("/?tab=final", status_code=303)
-
-
-@app.get("/edit/{player_id}", response_class=HTMLResponse)
-def edit_page(player_id: int, request: Request):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,'') FROM players WHERE id=%s", (player_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    if not row:
-        return page("<div class='card'><h2>No encontrada</h2><a class='btn' href='/'>Volver</a></div>")
-
-    pid, name, team, position, status, notes = row
-    status_options = "".join([f"<option value='{s}' {'selected' if s==status else ''}>{s}</option>" for s in ['Disponible', 'Lesionada', 'No disponible']])
-
-    return page(
-        f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post'>"
-        f"<div class='grid'><div><label>Nombre</label><input name='name' value='{html.escape(name or '')}' required></div>"
-        f"<div><label>Equipo actual</label><input name='team' value='{html.escape(team or '')}'></div>"
-        f"<div><label>Posición</label><select name='position'>"
-        f"<option value='Portera' {'selected' if position == 'Portera' else ''}>Portera</option>"
-        f"<option value='Defensa' {'selected' if position == 'Defensa' else ''}>Defensa</option>"
-        f"<option value='Medio' {'selected' if position == 'Medio' else ''}>Medio</option>"
-        f"<option value='Delantera' {'selected' if position == 'Delantera' else ''}>Delantera</option>"
-        f"</select></div>"
-        f"<div><label>Estado jugadora</label><select name='status'>{status_options}</select></div></div>"
-        f"<div style='margin-top:12px;'><label>Notas</label><textarea name='notes'>{html.escape(notes or '')}</textarea></div>"
-        f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar cambios</button><a class='btn btn-secondary' href='/'>Cancelar</a></div>"
-        f"</form></div>"
-    )
-
-
-@app.post("/update/{player_id}")
-def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s WHERE id=%s", (name.strip(), team.strip(), position.strip(), status, notes.strip(), player_id))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return RedirectResponse("/", status_code=303)
-
-
-@app.post("/delete-player/{player_id}")
-def delete_player(player_id: int, request: Request):
-    user = require_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    if not user.get("is_admin"):
-        return RedirectResponse("/?tab=database", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM players WHERE id=%s", (player_id,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
-    return RedirectResponse("/?tab=database", status_code=303)
-
-
-@app.post("/import")
-def import_csv(request: Request, file: UploadFile = File(...)):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    reader = csv.DictReader(file.file.read().decode("utf-8-sig").splitlines())
-    conn = get_conn()
-    cur = conn.cursor()
-    for row in reader:
-        name = (row.get("name") or row.get("nombre") or "").strip()
-        team = (row.get("team") or row.get("equipo") or "").strip()
-        position = (row.get("position") or row.get("posicion") or row.get("posición") or "").strip()
-        status = (row.get("status") or row.get("estado") or "Disponible").strip() or "Disponible"
-        notes = (row.get("notes") or row.get("notas") or "").strip()
-        if name:
-            cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s)", (name, team, position, status, notes))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return RedirectResponse("/?tab=database", status_code=303)
-
-
-@app.get("/export")
-def export_excel(request: Request, tab: str = "database"):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    if tab == "database":
-        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players ORDER BY id DESC")
-        rows = cur.fetchall()
-        headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
-    else:
-        wanted = "Objetivo" if tab == "objectives" else "Elegida"
-        cur.execute(
-            '''
-            SELECT p.name, p.team, p.position, d.status, COALESCE(d.draft_round, NULL), COALESCE(d.round_order, NULL), COALESCE(p.notes,'')
-            FROM team_player_decisions d
-            JOIN players p ON p.id = d.player_id
-            WHERE d.board_team=%s AND d.status=%s
-            ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
-            ''',
-            (board_team, wanted),
-        )
-        rows = cur.fetchall()
-        headers = ["Nombre", "Equipo actual", "Posición", "Estado", "Ronda", "Orden", "Notas"]
-    cur.close()
-    conn.close()
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = board_team
-    ws.append(headers)
-    for row in rows:
-        ws.append(row)
-    if tab == "final":
-        ws.append([])
-        ws.append(["Wildcard", get_wildcard(board_team)])
-
-    stream = io.BytesIO()
-    wb.save(stream)
-    stream.seek(0)
-    return StreamingResponse(
-        stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={board_team.lower()}_{tab}.xlsx"},
-    )
-
-
-# --- SAFE ADMIN BOOT FIX OVERRIDE ---
-def ensure_admin():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USER,))
-    row = cur.fetchone()
-
-    if row:
-        cur.execute(
-            "UPDATE users SET password_hash = %s, is_admin = TRUE WHERE username = %s",
-            (hash_text(ADMIN_PASSWORD), ADMIN_USER),
-        )
-    else:
-        cur.execute(
-            "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s)",
-            (ADMIN_USER, hash_text(ADMIN_PASSWORD), True),
-        )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-@app.post("/new-player/add")
-def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), club: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-        (dorsal.strip(), name.strip(), position.strip(), club.strip(), estimated_level.strip(), fit_level.strip(), scout_status.strip() or "Seguimiento", notes.strip())
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-    return RedirectResponse("/?tab=newplayers", status_code=303)
-
-
-@app.get("/new-player/{player_id}", response_class=HTMLResponse)
-def new_player_page(player_id: int, request: Request):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(age,''), COALESCE(club,''), COALESCE(dominant_foot,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(priority_level,''), COALESCE(control_skill,''), COALESCE(passing_skill,''), COALESCE(dribbling_skill,''), COALESCE(shooting_skill,''), COALESCE(speed_skill,''), COALESCE(stamina_skill,''), COALESCE(power_skill,''), COALESCE(positioning_skill,''), COALESCE(tactical_iq,''), COALESCE(versatility_skill,''), COALESCE(leadership_skill,''), COALESCE(character_skill,''), COALESCE(exp_f7,''), COALESCE(exp_f11,''), COALESCE(exp_kq,''), COALESCE(photo_url,''), COALESCE(video1_url,''), COALESCE(video2_url,''), COALESCE(video3_url,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    if not row:
-        return page("<div class='card'><h2>Jugadora nueva no encontrada</h2><a class='btn' href='/?tab=newplayers'>Volver</a></div>")
-    pid, dorsal, name, position, age, club, dominant_foot, estimated_level, fit_level, priority_level, control_skill, passing_skill, dribbling_skill, shooting_skill, speed_skill, stamina_skill, power_skill, positioning_skill, tactical_iq, versatility_skill, leadership_skill, character_skill, exp_f7, exp_f11, exp_kq, photo_url, video1_url, video2_url, video3_url, scout_status, notes = row
-
-    def sel(current, values):
-        return "".join([f"<option value='{html.escape(v)}' {'selected' if current == v else ''}>{html.escape(v)}</option>" for v in values])
-
-    lvl_opts = ["", "Top", "Muy interesante", "Interesante", "Seguimiento", "Descartable"]
-    fit_opts = ["", "Encaja mucho", "Encaja", "Duda", "No encaja"]
-    rate_opts = ["", "Alta", "Media", "Baja"]
-    exp_opts = ["", "Alta", "Media", "Baja", "Nula"]
-    status_opts = ["Seguimiento", "Top", "Interesante", "Descartada"]
-
-    photo_preview = f"<div style='margin-top:12px;'><img src='{html.escape(photo_url)}' style='max-width:220px;border-radius:12px;border:1px solid #e5e7eb;'></div>" if photo_url else ""
-
-    content = (
-        f"<div class='topbar'><div><h1>Ficha · {html.escape(name)}</h1><div class='muted'>Jugadora nueva · dorsal {html.escape(dorsal or '-')}</div></div>"
-        f"<div class='actions-toolbar'><a class='btn btn-secondary' href='/?tab=newplayers'>Volver</a><form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn btn-warning' type='submit'>Añadir a preselección</button></form></div></div>"
-        f"<form action='/new-player/{pid}' method='post'>"
-        f"<div class='grid-2'><div>"
-        f"<div class='card'><h2>Datos básicos</h2><div class='grid'>"
-        f"<div><label>Dorsal</label><input name='dorsal' value='{html.escape(dorsal)}'></div>"
-        f"<div><label>Nombre</label><input name='name' value='{html.escape(name)}' required></div>"
-        f"<div><label>Posición</label><select name='position'>{sel(position, ['Portera','Defensa','Medio','Delantera'])}</select></div>"
-        f"<div><label>Edad</label><input name='age' value='{html.escape(age)}'></div>"
-        f"<div><label>Club / Procedencia</label><input name='club' value='{html.escape(club)}'></div>"
-        f"<div><label>Pierna dominante</label><input name='dominant_foot' value='{html.escape(dominant_foot)}'></div>"
-        f"<div><label>Nivel estimado</label><select name='estimated_level'>{sel(estimated_level, lvl_opts)}</select></div>"
-        f"<div><label>Encaje</label><select name='fit_level'>{sel(fit_level, fit_opts)}</select></div>"
-        f"<div><label>Prioridad</label><select name='priority_level'>{sel(priority_level, ['', 'Muy alta','Alta','Media','Baja'])}</select></div>"
-        f"<div><label>Estado scout</label><select name='scout_status'>{sel(scout_status, status_opts)}</select></div>"
-        f"</div></div>"
-        f"<div class='card'><h2>Evaluación técnica</h2><div class='grid'>"
-        f"<div><label>Control</label><select name='control_skill'>{sel(control_skill, rate_opts)}</select></div>"
-        f"<div><label>Pase</label><select name='passing_skill'>{sel(passing_skill, rate_opts)}</select></div>"
-        f"<div><label>Regate</label><select name='dribbling_skill'>{sel(dribbling_skill, rate_opts)}</select></div>"
-        f"<div><label>Disparo</label><select name='shooting_skill'>{sel(shooting_skill, rate_opts)}</select></div>"
-        f"<div><label>Velocidad</label><select name='speed_skill'>{sel(speed_skill, rate_opts)}</select></div>"
-        f"<div><label>Resistencia</label><select name='stamina_skill'>{sel(stamina_skill, rate_opts)}</select></div>"
-        f"<div><label>Potencia</label><select name='power_skill'>{sel(power_skill, rate_opts)}</select></div>"
-        f"</div></div>"
-        f"<div class='card'><h2>Evaluación táctica y competitiva</h2><div class='grid'>"
-        f"<div><label>Posicionamiento</label><select name='positioning_skill'>{sel(positioning_skill, rate_opts)}</select></div>"
-        f"<div><label>Inteligencia táctica</label><select name='tactical_iq'>{sel(tactical_iq, rate_opts)}</select></div>"
-        f"<div><label>Versatilidad</label><select name='versatility_skill'>{sel(versatility_skill, rate_opts)}</select></div>"
-        f"<div><label>Liderazgo</label><select name='leadership_skill'>{sel(leadership_skill, rate_opts)}</select></div>"
-        f"<div><label>Carácter</label><select name='character_skill'>{sel(character_skill, rate_opts)}</select></div>"
-        f"<div><label>Exp. F7</label><select name='exp_f7'>{sel(exp_f7, exp_opts)}</select></div>"
-        f"<div><label>Exp. F11</label><select name='exp_f11'>{sel(exp_f11, exp_opts)}</select></div>"
-        f"<div><label>Exp. Kings/Queens</label><select name='exp_kq'>{sel(exp_kq, exp_opts)}</select></div>"
-        f"</div></div>"
-        f"<div class='card'><h2>Observaciones</h2><textarea name='notes'>{html.escape(notes)}</textarea></div>"
-        f"</div><div>"
-        f"<div class='card'><h2>Media scouting</h2><label>Foto principal (URL)</label><input name='photo_url' value='{html.escape(photo_url)}'>{photo_preview}"
-        f"<div class='grid' style='margin-top:12px;'><div><label>Vídeo 1</label><input name='video1_url' value='{html.escape(video1_url)}'></div><div><label>Vídeo 2</label><input name='video2_url' value='{html.escape(video2_url)}'></div><div><label>Vídeo 3</label><input name='video3_url' value='{html.escape(video3_url)}'></div></div>"
-        f"<div class='actions-toolbar' style='margin-top:12px;'>"
-        + (f"<a class='btn btn-secondary' href='{html.escape(video1_url)}' target='_blank'>Abrir vídeo 1</a>" if video1_url else "")
-        + (f"<a class='btn btn-secondary' href='{html.escape(video2_url)}' target='_blank'>Abrir vídeo 2</a>" if video2_url else "")
-        + (f"<a class='btn btn-secondary' href='{html.escape(video3_url)}' target='_blank'>Abrir vídeo 3</a>" if video3_url else "")
-        + f"</div></div></div></div>"
-        f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar ficha</button><a class='btn btn-secondary' href='/?tab=newplayers'>Cancelar</a></div>"
-        f"</form>"
-    )
-    return page(content)
-
-
-@app.post("/new-player/{player_id}")
-def save_new_player(player_id: int, request: Request, dorsal: str = Form(""), name: str = Form(...), position: str = Form(""), age: str = Form(""), club: str = Form(""), dominant_foot: str = Form(""), estimated_level: str = Form(""), fit_level: str = Form(""), priority_level: str = Form(""), control_skill: str = Form(""), passing_skill: str = Form(""), dribbling_skill: str = Form(""), shooting_skill: str = Form(""), speed_skill: str = Form(""), stamina_skill: str = Form(""), power_skill: str = Form(""), positioning_skill: str = Form(""), tactical_iq: str = Form(""), versatility_skill: str = Form(""), leadership_skill: str = Form(""), character_skill: str = Form(""), exp_f7: str = Form(""), exp_f11: str = Form(""), exp_kq: str = Form(""), photo_url: str = Form(""), video1_url: str = Form(""), video2_url: str = Form(""), video3_url: str = Form(""), scout_status: str = Form("Seguimiento"), notes: str = Form("")):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE new_players SET dorsal=%s, name=%s, position=%s, age=%s, club=%s, dominant_foot=%s, estimated_level=%s, fit_level=%s, priority_level=%s, control_skill=%s, passing_skill=%s, dribbling_skill=%s, shooting_skill=%s, speed_skill=%s, stamina_skill=%s, power_skill=%s, positioning_skill=%s, tactical_iq=%s, versatility_skill=%s, leadership_skill=%s, character_skill=%s, exp_f7=%s, exp_f11=%s, exp_kq=%s, photo_url=%s, video1_url=%s, video2_url=%s, video3_url=%s, scout_status=%s, notes=%s WHERE id=%s",
-        (dorsal.strip(), name.strip(), position.strip(), age.strip(), club.strip(), dominant_foot.strip(), estimated_level.strip(), fit_level.strip(), priority_level.strip(), control_skill.strip(), passing_skill.strip(), dribbling_skill.strip(), shooting_skill.strip(), speed_skill.strip(), stamina_skill.strip(), power_skill.strip(), positioning_skill.strip(), tactical_iq.strip(), versatility_skill.strip(), leadership_skill.strip(), character_skill.strip(), exp_f7.strip(), exp_f11.strip(), exp_kq.strip(), photo_url.strip(), video1_url.strip(), video2_url.strip(), video3_url.strip(), scout_status.strip(), notes.strip(), player_id))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return RedirectResponse(f"/new-player/{player_id}", status_code=303)
-
-
-@app.post("/new-player/delete/{player_id}")
-def delete_new_player(player_id: int, request: Request):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM new_players WHERE id=%s", (player_id,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
-    return RedirectResponse("/?tab=newplayers", status_code=303)
-
-
-
-@app.post("/new-players/bulk-delete")
-def bulk_delete_new_players(request: Request, new_player_ids: list[str] = Form(None)):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-
-    raw_ids = new_player_ids or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-
-    cleaned_ids = []
-    for value in raw_ids:
-        try:
-            cleaned_ids.append(int(str(value).strip()))
-        except Exception:
-            pass
-
-    if not cleaned_ids:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM new_players WHERE id = ANY(%s)", (cleaned_ids,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cur.close()
-        conn.close()
-
-    return RedirectResponse("/?tab=newplayers", status_code=303)
-
-
-@app.post("/new-player/bulk-to-preselection")
-def bulk_new_players_to_preselection(request: Request, new_player_ids: list[str] = Form(None)):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-
-    raw_ids = new_player_ids or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-
-    cleaned_ids = []
-    for value in raw_ids:
-        try:
-            cleaned_ids.append(int(str(value).strip()))
-        except Exception:
-            pass
-
-    if not cleaned_ids:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        for player_id in cleaned_ids:
-            cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
-            row = cur.fetchone()
-            if not row:
-                continue
-            dorsal, name, position, club, notes = row
-            player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
-            cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
-            created_player_id = cur.fetchone()[0]
-            cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cur.close()
-        conn.close()
-    return RedirectResponse("/?tab=objectives", status_code=303)
-
-
-@app.post("/new-player/to-preselection/{player_id}")
-def new_player_to_preselection(player_id: int, request: Request):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(notes,'') FROM new_players WHERE id=%s", (player_id,))
-    row = cur.fetchone()
-    if not row:
-        cur.close(); conn.close()
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-    dorsal, name, position, club, notes = row
-    player_notes = "[ORIGEN:NUEVA]" + (f" [DORSAL:{dorsal}]" if dorsal else "") + (f" {notes}" if notes else "")
-    try:
-        cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s) RETURNING id", (name, club, position, "Disponible", player_notes))
-        created_player_id = cur.fetchone()[0]
-        cur.execute("INSERT INTO team_player_decisions (board_team, player_id, status) VALUES (%s,%s,'Objetivo')", (board_team, created_player_id))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cur.close(); conn.close()
-    return RedirectResponse("/?tab=objectives", status_code=303)
