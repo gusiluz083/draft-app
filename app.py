@@ -425,7 +425,117 @@ document.addEventListener('DOMContentLoaded',()=>{
  }
 
  if(typeof refreshDraftdayEmptyState === 'function') refreshDraftdayEmptyState();
+ initBoard();
 });
+
+function initBoard(){
+ const pitch=document.getElementById('boardPitch');
+ const input=document.getElementById('boardStateInput');
+ const list=document.getElementById('boardSideList');
+ const sourcesBox=document.getElementById('boardSources');
+ const sourceDataEl=document.getElementById('boardAvailableData');
+ if(!pitch || !input) return;
+ let players=[];
+ let available={objectives:[], final:[], newplayers:[]};
+ try { players = JSON.parse(input.value || '[]'); } catch(e){ players=[]; }
+ try { available = JSON.parse(sourceDataEl ? (sourceDataEl.textContent || '{}') : '{}'); } catch(e){ available={objectives:[], final:[], newplayers:[]}; }
+ if(!Array.isArray(players)) players=[];
+ function saveState(){ input.value = JSON.stringify(players); renderList(); }
+ function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+ function esc(v){ return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+ function shortLabel(name, idx){ const t=(name||'').trim(); return t ? t.substring(0,2).toUpperCase() : String(idx+1); }
+ function existsBySource(sourceKey, itemId){ return players.some(p => p.sourceKey===sourceKey && String(p.sourceId||'')===String(itemId||'')); }
+ function addFromSource(sourceKey, item){
+   if(!item) return;
+   if(existsBySource(sourceKey, item.id)) return;
+   players.push({id:'src-'+sourceKey+'-'+item.id, sourceKey:sourceKey, sourceId:item.id, name:item.name||'', x:50, y:50});
+   renderPlayers(); saveState(); renderSources();
+ }
+ function renderList(){
+   if(!list) return;
+   if(!players.length){ list.innerHTML = "<div class='board-empty'>No hay jugadoras en la pizarra.</div>"; return; }
+   list.innerHTML = players.map((p,idx)=>{
+     const meta = p.sourceLabel ? `<span class="mini-meta">${esc(p.sourceLabel)}</span>` : '';
+     return `<div class="board-side-item"><div><strong>${esc((p.name||'Sin nombre'))}</strong>${meta}</div><button type="button" class="btn btn-danger action-btn" data-remove-board="${idx}">Quitar</button></div>`;
+   }).join('');
+   list.querySelectorAll('[data-remove-board]').forEach(btn=>{
+     btn.addEventListener('click', ()=>{ const i=parseInt(btn.getAttribute('data-remove-board')||'-1',10); if(i>=0){ players.splice(i,1); renderPlayers(); saveState(); renderSources(); } });
+   });
+ }
+ function renderSources(){
+   if(!sourcesBox) return;
+   const groups = [
+     {key:'final', label:'Plantilla', items:Array.isArray(available.final)?available.final:[]},
+     {key:'objectives', label:'Preselección', items:Array.isArray(available.objectives)?available.objectives:[]},
+     {key:'newplayers', label:'Jugadoras nuevas', items:Array.isArray(available.newplayers)?available.newplayers:[]}
+   ];
+   sourcesBox.innerHTML = groups.map(group=>{
+     const rows = group.items.length ? group.items.map(item=>{
+       const disabled = existsBySource(group.key, item.id);
+       const meta = [item.position||'', item.team||''].filter(Boolean).join(' · ');
+       return `<div class="board-source-item"><div><strong>${esc(item.name||'Sin nombre')}</strong>${meta ? `<span class="mini-meta">${esc(meta)}</span>` : ''}</div><button type="button" class="btn btn-secondary action-btn" data-board-add="${group.key}:${esc(String(item.id))}" ${disabled ? 'disabled' : ''}>${disabled ? 'Añadida' : 'Añadir'}</button></div>`;
+     }).join('') : `<div class='board-empty'>Sin jugadoras disponibles.</div>`;
+     return `<div class="board-source-group"><h4>${group.label}</h4><div class="board-source-list">${rows}</div></div>`;
+   }).join('');
+   sourcesBox.querySelectorAll('[data-board-add]').forEach(btn=>{
+     btn.addEventListener('click', ()=>{
+       const raw = btn.getAttribute('data-board-add') || '';
+       const parts = raw.split(':');
+       const sourceKey = parts[0] || '';
+       const sourceId = parts.slice(1).join(':');
+       const groupItems = Array.isArray(available[sourceKey]) ? available[sourceKey] : [];
+       const item = groupItems.find(x => String(x.id) === String(sourceId));
+       if(item){
+         const sourceLabelMap = {final:'Plantilla', objectives:'Preselección', newplayers:'Jugadoras nuevas'};
+         addFromSource(sourceKey, {...item, sourceLabel: sourceLabelMap[sourceKey] || ''});
+       }
+     });
+   });
+ }
+ function renderPlayers(){
+   pitch.querySelectorAll('.board-player').forEach(el=>el.remove());
+   players.forEach((p,idx)=>{
+     const el=document.createElement('div');
+     el.className='board-player';
+     el.style.left=(p.x||50)+'%';
+     el.style.top=(p.y||50)+'%';
+     el.setAttribute('data-index', idx);
+     el.innerHTML = `<div class="board-player-dot">${shortLabel(p.name, idx)}</div><input type="text" value="${esc(p.name||'')}" maxlength="30">`;
+     const nameInput=el.querySelector('input');
+     nameInput.addEventListener('input', ()=>{ players[idx].name = nameInput.value; el.querySelector('.board-player-dot').textContent = shortLabel(nameInput.value, idx); saveState(); });
+     let dragging=false;
+     const moveAt=(clientX, clientY)=>{
+       const rect=pitch.getBoundingClientRect();
+       players[idx].x = clamp(((clientX - rect.left) / rect.width) * 100, 3, 97);
+       players[idx].y = clamp(((clientY - rect.top) / rect.height) * 100, 3, 97);
+       el.style.left=players[idx].x+'%';
+       el.style.top=players[idx].y+'%';
+       input.value = JSON.stringify(players);
+     };
+     el.addEventListener('pointerdown', (ev)=>{
+       if(ev.target.tagName === 'INPUT') return;
+       dragging=true; el.classList.add('dragging'); el.setPointerCapture(ev.pointerId);
+       moveAt(ev.clientX, ev.clientY);
+     });
+     el.addEventListener('pointermove', (ev)=>{ if(dragging) moveAt(ev.clientX, ev.clientY); });
+     el.addEventListener('pointerup', ()=>{ dragging=false; el.classList.remove('dragging'); saveState(); });
+     el.addEventListener('pointercancel', ()=>{ dragging=false; el.classList.remove('dragging'); saveState(); });
+     pitch.appendChild(el);
+   });
+ }
+ const addBtn=document.getElementById('addBoardPlayer');
+ if(addBtn){ addBtn.addEventListener('click', ()=>{ players.push({id:'p'+Date.now(), name:'', x:50, y:50}); renderPlayers(); saveState(); renderSources(); }); }
+ const clearBtn=document.getElementById('clearBoardPlayers');
+ if(clearBtn){ clearBtn.addEventListener('click', ()=>{ if(confirm('¿Vaciar la pizarra?')){ players=[]; renderPlayers(); saveState(); renderSources(); } }); }
+ players = players.map(p=>{
+   if(p && typeof p === 'object'){
+     const labelMap = {final:'Plantilla', objectives:'Preselección', newplayers:'Jugadoras nuevas'};
+     if(!p.sourceLabel && p.sourceKey && labelMap[p.sourceKey]) p.sourceLabel = labelMap[p.sourceKey];
+   }
+   return p;
+ });
+ renderPlayers(); saveState(); renderSources();
+}
 </script>
 """
 
@@ -1406,7 +1516,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='card'><strong>Pizarra compartida del equipo</strong><br><span class='muted'>Última actualización: {updated_text}</span><br><span class='muted'>Guardado por: {updated_by_text}</span></div>"
-            f"<div class='board-shell'><div class='card board-card'><div class='board-toolbar'><button type='button' class='btn btn-secondary' onclick='addBoardPlayer()'>Añadir jugadora</button><button type='button' class='btn btn-light' onclick='clearBoardPlayers()'>Limpiar pizarra</button></div><form action='/board/save' method='post'><input type='hidden' id='boardStateInput' name='board_state' value='{state_json}'><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div><div style='margin-top:12px;'><button type='submit'>Guardar pizarra</button></div></form></div><div class='card'><h2>Jugadoras en pizarra</h2><div class='board-side-list' id='boardSideList'><div class='board-empty'>No hay jugadoras en la pizarra.</div></div><div class='board-source-group'><h4>Plantilla</h4><div class='board-source-list' id='boardSourceFinal'></div></div><div class='board-source-group'><h4>Preselección</h4><div class='board-source-list' id='boardSourceObjectives'></div></div><div class='board-source-group'><h4>Jugadoras nuevas</h4><div class='board-source-list' id='boardSourceNew'></div></div></div></div><script id='boardAvailableData' type='application/json'>{html.escape(board_available)}</script>{script}"
+            f"<div class='card board-card'><h2>Pizarra</h2><div class='muted' style='margin-bottom:12px;'>Libre, con nombres editables y guardado por equipo.</div>"
+            f"<form action='/board/save' method='post'><input type='hidden' id='boardStateInput' name='board_state' value='{state_json}'><script id='boardAvailableData' type='application/json'>{board_available}</script>"
+            f"<div class='board-shell'><div><div class='board-toolbar'><button type='button' class='btn' id='addBoardPlayer'>Añadir jugadora</button><button type='button' class='btn btn-secondary' id='clearBoardPlayers'>Vaciar pizarra</button><button type='submit' class='btn btn-success'>Guardar pizarra</button></div><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div></div><div class='card' style='margin-bottom:0;'><h3 style='margin-bottom:12px;'>Jugadoras en pizarra</h3><div id='boardSideList' class='board-side-list'></div><div id='boardSources'></div></div></div></form></div>"
         )
         return page(content)
 
