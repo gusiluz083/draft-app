@@ -480,6 +480,46 @@ def get_team(request: Request):
     return team if team in TEAMS else None
 
 
+def get_team_board_state(board_team: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT board_json, updated_at, COALESCE(updated_by, '') FROM team_board_state WHERE board_team=%s",
+        (board_team,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return [], None, ''
+    board_json, updated_at, updated_by = row
+    try:
+        data = json.loads(board_json or '[]')
+        if not isinstance(data, list):
+            data = []
+    except Exception:
+        data = []
+    return data, updated_at, updated_by or ''
+
+
+def save_team_board_state(board_team: str, data, updated_by: str = ''):
+    payload = json.dumps(data if isinstance(data, list) else [], ensure_ascii=False)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO team_board_state (board_team, board_json, updated_at, updated_by)
+        VALUES (%s, %s, CURRENT_TIMESTAMP, %s)
+        ON CONFLICT (board_team)
+        DO UPDATE SET board_json=EXCLUDED.board_json, updated_at=CURRENT_TIMESTAMP, updated_by=EXCLUDED.updated_by
+        """,
+        (board_team, payload, updated_by or ''),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 def get_stats(board_team: str):
     conn = get_conn()
     cur = conn.cursor()
