@@ -944,16 +944,48 @@ def select_module_page(request: Request):
         return RedirectResponse("/select-team", status_code=303)
 
     content = (
-        f"<div class='card'>"
-        f"<div class='topbar'>"
-        f"<div><h1>Elegir módulo</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
-        f"<div style='display:flex;gap:10px;flex-wrap:wrap;'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
-        f"</div>"
-        f"<div class='team-cards' style='margin-top:18px;'>"
-        f"<div class='team-card' style='text-align:left;'><h2>Gestión del DRAFT</h2><div class='muted' style='margin-bottom:12px;'>Acceso a jugadoras, jugadoras nuevas, preselección, plantilla, Draft Day y Pizarra.</div><a class='btn' href='/'>Acceder a Gestión del DRAFT</a></div>"
-        f"<div class='team-card' style='text-align:left;'><h2>Gestión de Plantilla</h2><div class='muted' style='margin-bottom:12px;'>Nuevo módulo independiente para la gestión deportiva del equipo y el seguimiento de competición.</div><a class='btn' href='/plantilla'>Acceder a Gestión de Plantilla</a></div>"
-        f"</div>"
-        f"</div>"
+        f"""<div style='min-height:72vh;display:flex;align-items:center;justify-content:center;padding:28px;'>
+        <div class='card' style='width:100%;max-width:1160px;padding:34px 36px 30px;'>
+            <div style='padding:26px 28px;border-radius:26px;background:linear-gradient(135deg,#0d1638 0%,#21388f 100%);color:#fff;box-shadow:0 14px 32px rgba(10,20,58,.18);'>
+                <div style='display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;'>
+                    <div>
+                        <h1 style='margin:0 0 6px;font-size:48px;line-height:1.02;'>Elegir módulo</h1>
+                        <div style='font-size:18px;opacity:.92;'>Equipo activo: <strong>{html.escape(board_team)}</strong></div>
+                    </div>
+                    <div style='display:flex;gap:10px;flex-wrap:wrap;align-items:center;'>
+                        <a class='btn btn-secondary' style='background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);color:#fff;text-decoration:none;' href='/select-team'>Cambiar equipo</a>
+                        <a class='btn btn-secondary' style='background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);color:#fff;text-decoration:none;' href='/logout'>Salir</a>
+                    </div>
+                </div>
+            </div>
+
+            <div style='max-width:760px;margin:24px auto 30px;text-align:center;'>
+                <div class='muted' style='font-size:18px;line-height:1.55;'>
+                    Selecciona el entorno de trabajo que quieres abrir para seguir gestionando <strong>{html.escape(board_team)}</strong>.
+                </div>
+            </div>
+
+            <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:24px;max-width:920px;margin:0 auto;'>
+                <div class='card' style='margin:0;text-align:left;border:1px solid #d9e1f0;border-radius:24px;padding:30px;box-shadow:0 12px 26px rgba(19,31,72,.08);'>
+                    <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#eef3ff;font-size:28px;margin-bottom:18px;'>📋</div>
+                    <h2 style='margin:0 0 12px;font-size:28px;'>Gestión del DRAFT</h2>
+                    <div class='muted' style='margin-bottom:20px;font-size:17px;line-height:1.55;'>
+                        Acceso a jugadoras, jugadoras nuevas, preselección, plantilla, Draft Day y Pizarra.
+                    </div>
+                    <a class='btn' style='display:inline-block;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700;' href='/'>Acceder a Gestión del DRAFT</a>
+                </div>
+
+                <div class='card' style='margin:0;text-align:left;border:1px solid #d9e1f0;border-radius:24px;padding:30px;box-shadow:0 12px 26px rgba(19,31,72,.08);'>
+                    <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#eef8f2;font-size:28px;margin-bottom:18px;'>⚽</div>
+                    <h2 style='margin:0 0 12px;font-size:28px;'>Gestión de Plantilla</h2>
+                    <div class='muted' style='margin-bottom:20px;font-size:17px;line-height:1.55;'>
+                        Nuevo módulo independiente para la gestión deportiva del equipo y el seguimiento de competición.
+                    </div>
+                    <a class='btn' style='display:inline-block;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700;' href='/plantilla'>Acceder a Gestión de Plantilla</a>
+                </div>
+            </div>
+        </div>
+        </div>"""
     )
     return page(content)
 
