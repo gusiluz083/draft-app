@@ -825,12 +825,7 @@ def login_page(request: Request, error: str = ""):
         "<form action='/login' method='post'>"
         "<div style='margin:12px 0;'><label>Usuario</label><input name='username' required></div>"
         "<div style='margin:12px 0;'><label>Contraseña</label><input type='password' name='password' required></div>"
-        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación desarrollada por Aniol y Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>
-</form>
-<div style="position:fixed; bottom:10px; right:15px; font-size:12px; color:#888; z-index:999;">
-App powered by Josep Maria Bofill
-</div>
-"
+        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación desarrollada por Aniol y Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
     )
 
 
@@ -886,7 +881,7 @@ def login(username: str = Form(...), password: str = Form(...)):
         conn.close()
 
     allowed_teams = TEAMS[:] if is_admin_flag else (TEAMS[:] if user_team == "__ALL__" else [t.strip() for t in user_team.split(",") if t.strip() in TEAMS])
-    next_path = "/select-team" if (is_admin_flag or len(allowed_teams) > 1) else "/"
+    next_path = "/select-team" if (is_admin_flag or len(allowed_teams) > 1) else "/select-module"
     r = RedirectResponse(next_path, status_code=303)
     r.set_cookie(SESSION_COOKIE, hash_text(f"{db_username}:{user_id}"), httponly=True, samesite="lax", max_age=604800)
     if (not is_admin_flag) and len(allowed_teams) == 1:
@@ -910,7 +905,7 @@ def select_team_page(request: Request):
 
     allowed = TEAMS[:] if user.get("is_admin") else user_allowed_teams(user)
     if len(allowed) == 1:
-        r = RedirectResponse("/", status_code=303)
+        r = RedirectResponse("/select-module", status_code=303)
         r.set_cookie(TEAM_COOKIE, allowed[0], httponly=True, samesite="lax", max_age=604800)
         return r
     if not allowed:
@@ -934,9 +929,57 @@ def select_team(request: Request, team: str = Form(...)):
     allowed = TEAMS[:] if user.get("is_admin") else user_allowed_teams(user)
     if team not in allowed:
         return RedirectResponse("/select-team", status_code=303)
-    r = RedirectResponse("/", status_code=303)
+    r = RedirectResponse("/select-module", status_code=303)
     r.set_cookie(TEAM_COOKIE, team, httponly=True, samesite="lax", max_age=604800)
     return r
+
+
+@app.get("/select-module", response_class=HTMLResponse)
+def select_module_page(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    content = (
+        f"<div class='card'>"
+        f"<div class='topbar'>"
+        f"<div><h1>Elegir módulo</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
+        f"<div style='display:flex;gap:10px;flex-wrap:wrap;'><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
+        f"</div>"
+        f"<div class='team-cards' style='margin-top:18px;'>"
+        f"<div class='team-card' style='text-align:left;'><h2>Gestión del DRAFT</h2><div class='muted' style='margin-bottom:12px;'>Acceso a jugadoras, jugadoras nuevas, preselección, plantilla, Draft Day y Pizarra.</div><a class='btn' href='/'>Acceder a Gestión del DRAFT</a></div>"
+        f"<div class='team-card' style='text-align:left;'><h2>Gestión de Plantilla</h2><div class='muted' style='margin-bottom:12px;'>Nuevo módulo independiente para la gestión deportiva del equipo y el seguimiento de competición.</div><a class='btn' href='/plantilla'>Acceder a Gestión de Plantilla</a></div>"
+        f"</div>"
+        f"</div>"
+    )
+    return page(content)
+
+
+@app.get("/plantilla", response_class=HTMLResponse)
+def plantilla_home(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    content = (
+        f"<div class='card'>"
+        f"<div class='topbar'>"
+        f"<div><h1>Gestión de Plantilla</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
+        f"<div style='display:flex;gap:10px;flex-wrap:wrap;'><a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
+        f"</div>"
+        f"<div class='card' style='margin-top:18px;'>"
+        f"<h2>Nuevo módulo en construcción</h2>"
+        f"<div class='muted'>Aquí empezará la nueva Gestión de Plantilla de <strong>{html.escape(board_team)}</strong>. El módulo del DRAFT sigue estando intacto en su acceso habitual.</div>"
+        f"</div>"
+        f"</div>"
+    )
+    return page(content)
 
 
 @app.get("/", response_class=HTMLResponse)
