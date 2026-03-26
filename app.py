@@ -994,7 +994,7 @@ def select_module_page(request: Request):
                     <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#eef3ff;font-size:28px;margin-bottom:18px;'>📋</div>
                     <h2 style='margin:0 0 12px;font-size:28px;'>Gestión del DRAFT</h2>
                     <div class='muted' style='margin-bottom:20px;font-size:17px;line-height:1.55;'>
-                        Acceso a jugadoras, jugadoras nuevas, preselección, plantilla, Draft Day y acceso a Gestión de Plantilla.
+                        Acceso a jugadoras, jugadoras nuevas, preselección, plantilla, Draft Day y Pizarra.
                     </div>
                     <a class='btn' style='display:inline-block;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700;' href='/'>Acceder a Gestión del DRAFT</a>
                 </div>
@@ -1018,7 +1018,6 @@ def select_module_page(request: Request):
 def plantilla_module_nav(active: str) -> str:
     items = [
         ("plantilla", "Plantilla", "/plantilla"),
-        ("pizarra", "Pizarra", "/plantilla/pizarra"),
         ("estadisticas", "Estadísticas", "/plantilla/estadisticas"),
         ("calendario", "Calendario", "/plantilla/calendario"),
         ("resultados", "Resultados", "/plantilla/resultados"),
@@ -1029,6 +1028,308 @@ def plantilla_module_nav(active: str) -> str:
         links.append(f"<a class='{cls}' href='{href}'>{html.escape(label)}</a>")
     return "<div class='module-tabs'>" + "".join(links) + "</div>"
 
+
+def render_plantilla_calendar(board_team: str) -> str:
+    team_safe = html.escape(board_team)
+    storage_key = f"draftManagerPlantillaCalendar::{board_team}"
+    return f"""
+    <style>
+    .calendar-shell{{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,.9fr);gap:22px;align-items:start;}}
+    .calendar-panel{{background:#fff;border:1px solid #e5e7eb;border-radius:24px;box-shadow:0 14px 34px rgba(15,23,42,.07);overflow:hidden;}}
+    .calendar-head{{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:22px 24px;border-bottom:1px solid #edf2f7;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);flex-wrap:wrap;}}
+    .calendar-title h2{{margin:0;font-size:28px;color:#142850;}}
+    .calendar-title .muted{{margin-top:6px;}}
+    .calendar-actions{{display:flex;gap:10px;flex-wrap:wrap;}}
+    .calendar-btn{{border:1px solid #dbe3f0;background:#fff;color:#142850;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;box-shadow:0 8px 18px rgba(15,23,42,.06);}}
+    .calendar-btn:hover{{transform:translateY(-1px);}}
+    .calendar-grid-wrap{{padding:20px 22px 24px;}}
+    .calendar-weekdays,.calendar-grid{{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;}}
+    .calendar-weekdays{{margin-bottom:10px;}}
+    .calendar-weekday{{text-align:center;font-size:12px;font-weight:800;letter-spacing:.08em;color:#64748b;text-transform:uppercase;padding:6px 0;}}
+    .calendar-day{{min-height:132px;border:1px solid #e5e7eb;border-radius:18px;background:#fff;padding:12px;display:flex;flex-direction:column;gap:8px;position:relative;cursor:pointer;transition:all .16s ease;}}
+    .calendar-day:hover{{border-color:#bfd0ff;box-shadow:0 12px 22px rgba(37,99,235,.10);transform:translateY(-1px);}}
+    .calendar-day.is-outside{{background:#f8fafc;color:#94a3b8;}}
+    .calendar-day.is-today{{border-color:#2563eb;box-shadow:0 12px 22px rgba(37,99,235,.16);}}
+    .calendar-day.is-selected{{outline:2px solid rgba(37,99,235,.18);}}
+    .calendar-day-num{{font-weight:900;font-size:18px;color:#142850;}}
+    .calendar-day.is-outside .calendar-day-num{{color:#94a3b8;}}
+    .calendar-count{{display:inline-flex;align-self:flex-start;padding:4px 8px;border-radius:999px;background:#eef3ff;color:#1d4ed8;font-size:11px;font-weight:800;}}
+    .calendar-event-list{{display:flex;flex-direction:column;gap:6px;}}
+    .calendar-event-pill{{display:block;padding:7px 9px;border-radius:12px;font-size:12px;font-weight:700;line-height:1.25;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+    .event-training{{background:#dcfce7;color:#166534;}}
+    .event-match{{background:#fee2e2;color:#b91c1c;}}
+    .event-other{{background:#ede9fe;color:#6d28d9;}}
+    .calendar-side{{display:flex;flex-direction:column;gap:18px;}}
+    .calendar-card{{background:#fff;border:1px solid #e5e7eb;border-radius:24px;padding:22px;box-shadow:0 14px 34px rgba(15,23,42,.07);}}
+    .calendar-card h3{{margin:0 0 14px;color:#142850;font-size:22px;}}
+    .calendar-card h4{{margin:0 0 12px;color:#142850;font-size:18px;}}
+    .calendar-form{{display:grid;gap:12px;}}
+    .calendar-form label{{display:grid;gap:6px;font-size:13px;font-weight:700;color:#334155;}}
+    .calendar-form input,.calendar-form select,.calendar-form textarea{{width:100%;border:1px solid #dbe3f0;border-radius:12px;padding:11px 12px;font:inherit;background:#fff;}}
+    .calendar-form textarea{{min-height:88px;resize:vertical;}}
+    .calendar-form .btn-row{{display:flex;gap:10px;flex-wrap:wrap;}}
+    .calendar-empty{{padding:14px 16px;border-radius:16px;background:#f8fafc;color:#64748b;border:1px dashed #dbe3f0;}}
+    .agenda-list{{display:grid;gap:10px;}}
+    .agenda-item{{padding:14px 15px;border:1px solid #e5e7eb;border-radius:16px;background:#fff;}}
+    .agenda-item .top{{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}}
+    .agenda-item strong{{color:#142850;display:block;margin-bottom:4px;}}
+    .agenda-meta{{font-size:13px;color:#64748b;}}
+    .legend{{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;}}
+    .legend span{{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:#475569;}}
+    .legend i{{display:inline-block;width:12px;height:12px;border-radius:999px;}}
+    @media (max-width: 1100px){{.calendar-shell{{grid-template-columns:1fr;}}}}
+    @media (max-width: 700px){{.calendar-grid,.calendar-weekdays{{gap:6px;}}.calendar-day{{min-height:108px;padding:10px;}}.calendar-event-pill{{font-size:11px;padding:6px 8px;}}}}
+    </style>
+
+    <div class='calendar-shell'>
+      <section class='calendar-panel'>
+        <div class='calendar-head'>
+          <div class='calendar-title'>
+            <h2>Calendario del equipo</h2>
+            <div class='muted'>Nuevo calendario integrado dentro de <strong>Gestión de Plantilla</strong> para <strong>{team_safe}</strong>.</div>
+            <div class='legend'>
+              <span><i style='background:#dcfce7;'></i>Entrenamiento</span>
+              <span><i style='background:#fee2e2;'></i>Partido</span>
+              <span><i style='background:#ede9fe;'></i>Otro evento</span>
+            </div>
+          </div>
+          <div class='calendar-actions'>
+            <button type='button' class='calendar-btn' id='calendarPrevBtn'>◀ Mes anterior</button>
+            <button type='button' class='calendar-btn' id='calendarTodayBtn'>Hoy</button>
+            <button type='button' class='calendar-btn' id='calendarNextBtn'>Mes siguiente ▶</button>
+          </div>
+        </div>
+        <div class='calendar-grid-wrap'>
+          <div id='calendarMonthLabel' style='font-size:24px;font-weight:900;color:#142850;margin-bottom:16px;'></div>
+          <div class='calendar-weekdays'>
+            <div class='calendar-weekday'>Lun</div><div class='calendar-weekday'>Mar</div><div class='calendar-weekday'>Mié</div><div class='calendar-weekday'>Jue</div><div class='calendar-weekday'>Vie</div><div class='calendar-weekday'>Sáb</div><div class='calendar-weekday'>Dom</div>
+          </div>
+          <div class='calendar-grid' id='calendarGrid'></div>
+        </div>
+      </section>
+
+      <aside class='calendar-side'>
+        <section class='calendar-card'>
+          <h3>Añadir evento</h3>
+          <form class='calendar-form' id='calendarEventForm'>
+            <label>Fecha
+              <input type='date' id='calendarEventDate' required>
+            </label>
+            <label>Hora
+              <input type='time' id='calendarEventTime'>
+            </label>
+            <label>Título
+              <input type='text' id='calendarEventTitle' placeholder='Ej. Entreno táctico' maxlength='80' required>
+            </label>
+            <label>Tipo
+              <select id='calendarEventType'>
+                <option value='training'>Entrenamiento</option>
+                <option value='match'>Partido</option>
+                <option value='other'>Otro</option>
+              </select>
+            </label>
+            <label>Descripción
+              <textarea id='calendarEventNotes' placeholder='Campo, rival, observaciones...'></textarea>
+            </label>
+            <div class='btn-row'>
+              <button type='submit' class='btn'>Guardar evento</button>
+              <button type='button' class='btn btn-secondary' id='calendarClearFormBtn'>Limpiar</button>
+            </div>
+          </form>
+        </section>
+
+        <section class='calendar-card'>
+          <h3 id='selectedDateLabel'>Próximos eventos</h3>
+          <div id='selectedDateEvents' class='agenda-list'></div>
+        </section>
+      </aside>
+    </div>
+
+    <script>
+    (function() {{
+      const storageKey = {json.dumps(storage_key)};
+      const teamName = {json.dumps(board_team)};
+      const monthLabel = document.getElementById('calendarMonthLabel');
+      const grid = document.getElementById('calendarGrid');
+      const form = document.getElementById('calendarEventForm');
+      const dateInput = document.getElementById('calendarEventDate');
+      const timeInput = document.getElementById('calendarEventTime');
+      const titleInput = document.getElementById('calendarEventTitle');
+      const typeInput = document.getElementById('calendarEventType');
+      const notesInput = document.getElementById('calendarEventNotes');
+      const selectedDateLabel = document.getElementById('selectedDateLabel');
+      const selectedDateEvents = document.getElementById('selectedDateEvents');
+      const today = new Date();
+      let currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      let selectedDate = toIso(today);
+
+      function seedEvents() {{
+        return [
+          {{ id: uid(), date: offsetDate(2), time: '20:00', title: 'Entrenamiento de equipo', type: 'training', notes: 'Sesión de campo para ' + teamName }},
+          {{ id: uid(), date: offsetDate(5), time: '19:30', title: 'Revisión táctica', type: 'other', notes: 'Vídeo y estrategia' }},
+          {{ id: uid(), date: offsetDate(8), time: '21:00', title: 'Partido de liga', type: 'match', notes: 'Confirmar convocatoria' }}
+        ];
+      }}
+
+      function readEvents() {{
+        try {{
+          const raw = localStorage.getItem(storageKey);
+          if (!raw) {{
+            const seeded = seedEvents();
+            localStorage.setItem(storageKey, JSON.stringify(seeded));
+            return seeded;
+          }}
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        }} catch (e) {{
+          return [];
+        }}
+      }}
+
+      function writeEvents(events) {{
+        localStorage.setItem(storageKey, JSON.stringify(events));
+      }}
+
+      function uid() {{
+        return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      }}
+
+      function toIso(date) {{
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${{y}}-${{m}}-${{d}}`;
+      }}
+
+      function offsetDate(days) {{
+        const d = new Date();
+        d.setDate(d.getDate() + days);
+        return toIso(d);
+      }}
+
+      function startOfCalendar(date) {{
+        const first = new Date(date.getFullYear(), date.getMonth(), 1);
+        const day = (first.getDay() + 6) % 7;
+        first.setDate(first.getDate() - day);
+        return first;
+      }}
+
+      function formatMonth(date) {{
+        return new Intl.DateTimeFormat('es-ES', {{ month: 'long', year: 'numeric' }}).format(date).replace(/^./, c => c.toUpperCase());
+      }}
+
+      function formatDateLabel(isoDate) {{
+        const [y, m, d] = isoDate.split('-').map(Number);
+        return new Intl.DateTimeFormat('es-ES', {{ weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }}).format(new Date(y, m - 1, d)).replace(/^./, c => c.toUpperCase());
+      }}
+
+      function escapeHtml(value) {{
+        return String(value || '').replace(/[&<>"']/g, s => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[s]));
+      }}
+
+      function typeLabel(type) {{
+        return type === 'training' ? 'Entrenamiento' : (type === 'match' ? 'Partido' : 'Otro');
+      }}
+
+      function typeClass(type) {{
+        return type === 'training' ? 'event-training' : (type === 'match' ? 'event-match' : 'event-other');
+      }}
+
+      function sortedEvents(events) {{
+        return [...events].sort((a, b) => `${{a.date}} ${{a.time || '99:99'}}`.localeCompare(`${{b.date}} ${{b.time || '99:99'}}`));
+      }}
+
+      function renderCalendar() {{
+        const events = sortedEvents(readEvents());
+        const byDate = events.reduce((acc, event) => {{
+          (acc[event.date] ||= []).push(event);
+          return acc;
+        }}, {{}});
+        monthLabel.textContent = formatMonth(currentMonth);
+        grid.innerHTML = '';
+        let cursor = startOfCalendar(currentMonth);
+        for (let i = 0; i < 42; i++) {{
+          const iso = toIso(cursor);
+          const dayEvents = byDate[iso] || [];
+          const cell = document.createElement('button');
+          cell.type = 'button';
+          cell.className = 'calendar-day';
+          if (cursor.getMonth() !== currentMonth.getMonth()) cell.classList.add('is-outside');
+          if (iso === toIso(today)) cell.classList.add('is-today');
+          if (iso === selectedDate) cell.classList.add('is-selected');
+          cell.innerHTML = `<div class="calendar-day-num">${{cursor.getDate()}}</div>` +
+            (dayEvents.length ? `<div class="calendar-count">${{dayEvents.length}} evento${{dayEvents.length > 1 ? 's' : ''}}</div>` : '') +
+            `<div class="calendar-event-list">${{dayEvents.slice(0, 3).map(evt => `<span class="calendar-event-pill ${{typeClass(evt.type)}}">${{evt.time ? escapeHtml(evt.time) + ' · ' : ''}}${{escapeHtml(evt.title)}}</span>`).join('')}}</div>`;
+          cell.addEventListener('click', function() {{
+            selectedDate = iso;
+            dateInput.value = iso;
+            renderCalendar();
+            renderSelectedDate();
+          }});
+          grid.appendChild(cell);
+          cursor.setDate(cursor.getDate() + 1);
+        }}
+        renderSelectedDate();
+      }}
+
+      function renderSelectedDate() {{
+        const events = sortedEvents(readEvents()).filter(evt => evt.date === selectedDate);
+        selectedDateLabel.textContent = 'Eventos · ' + formatDateLabel(selectedDate);
+        if (!events.length) {{
+          selectedDateEvents.innerHTML = `<div class="calendar-empty">No hay eventos para este día. Usa el formulario para añadir uno.</div>`;
+          return;
+        }}
+        selectedDateEvents.innerHTML = events.map(evt => `
+          <article class="agenda-item">
+            <div class="top">
+              <div>
+                <strong>${{escapeHtml(evt.title)}}</strong>
+                <div class="agenda-meta">${{escapeHtml(typeLabel(evt.type))}}${{evt.time ? ' · ' + escapeHtml(evt.time) : ''}}</div>
+              </div>
+              <button type="button" class="calendar-btn" data-delete-id="${{evt.id}}">Eliminar</button>
+            </div>
+            ${{evt.notes ? `<div class="agenda-meta" style="margin-top:8px;line-height:1.45;">${{escapeHtml(evt.notes)}}</div>` : ''}}
+          </article>
+        `).join('');
+        selectedDateEvents.querySelectorAll('[data-delete-id]').forEach(btn => {{
+          btn.addEventListener('click', function() {{
+            const id = this.getAttribute('data-delete-id');
+            const next = readEvents().filter(evt => evt.id !== id);
+            writeEvents(next);
+            renderCalendar();
+          }});
+        }});
+      }}
+
+      form.addEventListener('submit', function(e) {{
+        e.preventDefault();
+        const date = dateInput.value;
+        const title = titleInput.value.trim();
+        if (!date || !title) return;
+        const event = {{ id: uid(), date, time: timeInput.value, title, type: typeInput.value, notes: notesInput.value.trim() }};
+        const events = readEvents();
+        events.push(event);
+        writeEvents(events);
+        selectedDate = date;
+        currentMonth = new Date(date + 'T00:00:00');
+        form.reset();
+        dateInput.value = selectedDate;
+        renderCalendar();
+      }});
+
+      document.getElementById('calendarClearFormBtn').addEventListener('click', function() {{
+        form.reset();
+        dateInput.value = selectedDate;
+      }});
+      document.getElementById('calendarPrevBtn').addEventListener('click', function() {{ currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1); renderCalendar(); }});
+      document.getElementById('calendarNextBtn').addEventListener('click', function() {{ currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1); renderCalendar(); }});
+      document.getElementById('calendarTodayBtn').addEventListener('click', function() {{ selectedDate = toIso(today); currentMonth = new Date(today.getFullYear(), today.getMonth(), 1); dateInput.value = selectedDate; renderCalendar(); }});
+
+      dateInput.value = selectedDate;
+      renderCalendar();
+    }})();
+    </script>
+    """
 
 def player_photo_placeholder(name: str) -> str:
     safe_name = (name or "").strip() or "Jugadora"
@@ -1140,7 +1441,7 @@ def plantilla_layout(request: Request, board_team: str, active: str, body: str) 
     .module-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:22px;}
     .module-hero h1{margin:0;font-size:34px;color:#142850;}
     .module-actions{display:flex;gap:10px;flex-wrap:wrap;}
-    .module-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:18px 0 24px;}
+    .module-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0 24px;}
     .module-tab{display:flex;align-items:center;justify-content:center;padding:18px 14px;border-radius:18px;text-decoration:none;font-weight:800;font-size:18px;color:#1f3b73;background:linear-gradient(180deg,#eef4ff 0%,#e1ebff 100%);border:1px solid #d5e2ff;box-shadow:0 10px 24px rgba(31,59,115,0.08);transition:all .2s ease;}
     .module-tab:hover{transform:translateY(-2px);box-shadow:0 14px 28px rgba(31,59,115,0.14);}
     .module-tab.active{background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;border-color:#1b2f63;box-shadow:0 16px 32px rgba(27,47,99,0.28);}
@@ -1219,99 +1520,7 @@ def plantilla_calendario(request: Request):
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    body = (
-        "<div class='module-placeholder'>"
-        "<h2>Calendario</h2>"
-        "<div class='muted'>Página preparada para integrar partidos, entrenamientos y eventos del equipo.</div>"
-        "</div>"
-    )
-    return plantilla_layout(request, board_team, "calendario", body)
-
-
-def render_board_module_body(board_team: str) -> str:
-    board_state, board_updated_at, board_updated_by = get_team_board_state(board_team)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT player_id, p.name, COALESCE(p.position,'') FROM team_player_decisions d JOIN players p ON p.id=d.player_id WHERE d.board_team=%s AND d.status='Elegida' ORDER BY p.name ASC", (board_team,))
-    final_players = cur.fetchall()
-    cur.execute("SELECT player_id, p.name, COALESCE(p.position,'') FROM team_player_decisions d JOIN players p ON p.id=d.player_id WHERE d.board_team=%s AND d.status='Objetivo' ORDER BY COALESCE(d.round_order,999), p.name ASC", (board_team,))
-    objective_players = cur.fetchall()
-    cur.execute("SELECT id, name, COALESCE(position,'') FROM new_players ORDER BY name ASC")
-    new_board_players = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    def _board_source(items, prefix):
-        return [{"id": f"{prefix}-{pid}", "name": name or "", "position": position or ""} for pid, name, position in items]
-
-    board_available = json.dumps(
-        {
-            "final": _board_source(final_players, "final"),
-            "objectives": _board_source(objective_players, "objective"),
-            "newplayers": _board_source(new_board_players, "new"),
-        },
-        ensure_ascii=False,
-    )
-    state_json = html.escape(json.dumps(board_state, ensure_ascii=False))
-    updated_text = board_updated_at.strftime("%d/%m/%Y %H:%M") if board_updated_at else "Sin guardar todavía"
-    updated_by_text = html.escape(board_updated_by or "—")
-    script = """<script>
-(function(){
- const pitch=document.getElementById('boardPitch');
- const input=document.getElementById('boardStateInput');
- const side=document.getElementById('boardSideList');
- const available=JSON.parse(document.getElementById('boardAvailableData').textContent);
- let state=[];
- try{state=JSON.parse(input.value||'[]'); if(!Array.isArray(state)) state=[];}catch(e){state=[];}
- function esc(v){return String(v||'').replace(/[&<>\"']/g,function(s){return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'})[s];});}
- function save(){input.value=JSON.stringify(state);}
- function renderSide(){
-   if(!state.length){side.innerHTML="<div class='board-empty'>No hay jugadoras en la pizarra.</div>"; return;}
-   side.innerHTML=state.map((p,i)=>`<div class=\"board-side-item\"><div><strong>${esc(p.name||'Sin nombre')}</strong><span class=\"mini-meta\">${Math.round(p.x)}% / ${Math.round(p.y)}%</span></div><button type=\"button\" class=\"btn btn-danger action-btn\" data-remove=\"${i}\">Quitar</button></div>`).join('');
-   side.querySelectorAll('[data-remove]').forEach(btn=>btn.addEventListener('click',()=>{state.splice(Number(btn.dataset.remove),1); render();}));
- }
- function wire(el,p){
-   const inp=el.querySelector('input');
-   inp.addEventListener('input',()=>{p.name=inp.value.slice(0,80); save(); renderSide();});
-   let dragging=false;
-   function moveAt(x,y){const r=pitch.getBoundingClientRect(); p.x=Math.max(2,Math.min(98,((x-r.left)/r.width)*100)); p.y=Math.max(2,Math.min(98,((y-r.top)/r.height)*100)); el.style.left=p.x+'%'; el.style.top=p.y+'%'; save(); renderSide();}
-   el.addEventListener('pointerdown',e=>{if(e.target.tagName==='INPUT') return; dragging=true; el.classList.add('dragging'); el.setPointerCapture(e.pointerId); e.preventDefault();});
-   el.addEventListener('pointermove',e=>{if(dragging) moveAt(e.clientX,e.clientY);});
-   el.addEventListener('pointerup',()=>{dragging=false; el.classList.remove('dragging');});
-   el.addEventListener('pointercancel',()=>{dragging=false; el.classList.remove('dragging');});
- }
- function render(){
-   pitch.innerHTML='';
-   state.forEach((p,i)=>{const el=document.createElement('div'); el.className='board-player'; el.style.left=(p.x||50)+'%'; el.style.top=(p.y||50)+'%'; el.innerHTML=`<div class=\"board-player-dot\">${i+1}</div><input value=\"${esc(p.name||'')}\" maxlength=\"80\">`; pitch.appendChild(el); wire(el,p);});
-   save(); renderSide();
- }
- window.addBoardPlayer=function(name){state.push({id:'manual-'+Date.now()+Math.random().toString(36).slice(2,7), name:name||'', x:50, y:50}); render();};
- window.clearBoardPlayers=function(){state=[]; render();};
- function renderSources(id, items){const box=document.getElementById(id); if(!items.length){box.innerHTML='<div class="board-empty">Sin jugadoras disponibles.</div>'; return;} box.innerHTML=items.map(item=>`<div class="board-source-item"><div><strong>${esc(item.name)}</strong><span class="mini-meta">${esc(item.position||'')}</span></div><button type="button" class="btn btn-secondary action-btn" data-name="${esc(item.name)}">Añadir</button></div>`).join(''); box.querySelectorAll('[data-name]').forEach(btn=>btn.addEventListener('click',()=>{window.addBoardPlayer(btn.dataset.name || '');}));}
- renderSources('boardSourceFinal', available.final || []);
- renderSources('boardSourceObjectives', available.objectives || []);
- renderSources('boardSourceNew', available.newplayers || []);
- render();
-})();
-</script>"""
-    return (
-        f"<div class='card'><strong>Pizarra compartida del equipo</strong><br><span class='muted'>Última actualización: {updated_text}</span><br><span class='muted'>Guardado por: {updated_by_text}</span></div>"
-        f"<div class='card board-card'><h2>Pizarra</h2><div class='muted' style='margin-bottom:12px;'>Libre, con nombres editables y guardado por equipo.</div>"
-        f"<form action='/board/save' method='post'><input type='hidden' name='redirect_to' value='/plantilla/pizarra'><input type='hidden' id='boardStateInput' name='board_state' value='{state_json}'><script id='boardAvailableData' type='application/json'>{board_available}</script>"
-        f"<div class='board-shell'><div><div class='board-toolbar'><button type='button' class='btn' id='addBoardPlayer'>Añadir jugadora</button><button type='button' class='btn btn-secondary' id='clearBoardPlayers'>Vaciar pizarra</button><button type='submit' class='btn btn-success'>Guardar pizarra</button></div><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div></div><div class='card' style='margin-bottom:0;'><h3 style='margin-bottom:12px;'>Jugadoras en pizarra</h3><div id='boardSideList' class='board-side-list'></div><div id='boardSources'></div></div></div></form></div>"
-        f"{script}"
-    )
-
-
-@app.get("/plantilla/pizarra", response_class=HTMLResponse)
-def plantilla_pizarra(request: Request):
-    user = require_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-    return plantilla_layout(request, board_team, "pizarra", render_board_module_body(board_team))
+    return plantilla_layout(request, board_team, "calendario", render_plantilla_calendar(board_team))
 
 
 @app.get("/plantilla/resultados", response_class=HTMLResponse)
@@ -1834,7 +2043,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
         f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
@@ -1850,8 +2059,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         return page(content)
 
     if tab == "board":
-        return RedirectResponse("/plantilla/pizarra", status_code=303)
-
         board_state, board_updated_at, board_updated_by = get_team_board_state(board_team)
         conn = get_conn()
         cur = conn.cursor()
@@ -1912,7 +2119,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 </script>"""
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='card'><strong>Pizarra compartida del equipo</strong><br><span class='muted'>Última actualización: {updated_text}</span><br><span class='muted'>Guardado por: {updated_by_text}</span></div>"
@@ -1928,7 +2135,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
         
@@ -1944,7 +2151,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
 
 @app.post("/board/save")
-def board_save(request: Request, board_state: str = Form("[]"), redirect_to: str = Form("/plantilla/pizarra")):
+def board_save(request: Request, board_state: str = Form("[]")):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -1956,8 +2163,7 @@ def board_save(request: Request, board_state: str = Form("[]"), redirect_to: str
     except Exception:
         data = []
     save_team_board_state(board_team, data, user.get("username", ""))
-    target = redirect_to if isinstance(redirect_to, str) and redirect_to.startswith("/") else "/plantilla/pizarra"
-    return RedirectResponse(target, status_code=303)
+    return RedirectResponse("/?tab=board", status_code=303)
 
 
 @app.post("/users/create")
