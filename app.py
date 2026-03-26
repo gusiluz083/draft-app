@@ -1119,17 +1119,6 @@ def delete_local_photo_if_possible(photo_url: str) -> None:
     except Exception:
         pass
 
-def safe_return_to(value: str | None, fallback: str = "/") -> str:
-    value = (value or "").strip()
-    if not value:
-        return fallback
-    if value.startswith("http://") or value.startswith("https://"):
-        return fallback
-    if not value.startswith("/"):
-        return fallback
-    return value
-
-
 def plantilla_layout(request: Request, board_team: str, active: str, body: str) -> str:
     module_styles = """
     <style>
@@ -1332,7 +1321,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for pid, name, team, position, status, notes in players:
             search_blob = " ".join([name or "", team or "", position or "", status or "", notes or ""])
             actions = "".join([
-                f"<a class='btn btn-light action-btn' href='/edit/{pid}?from={quote('/?tab=database', safe='/?=&-%#')}'>Editar</a>",
+                f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
@@ -1363,7 +1352,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
             search_blob = " ".join([name or "", team or "", position or "", decision_status or "", notes or ""])
             round_display = draft_round if draft_round else ""
-            actions = [f"<a class='btn btn-light action-btn' href='/edit/{pid}?from={quote(f'/?tab={tab}', safe='/?=&-%#')}'>Editar</a>"]
+            actions = [f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>"]
             if tab == "objectives":
                 opts = "<option value=''>Ronda</option>" + "".join([f"<option value='{i}' {'selected' if draft_round==i else ''}>{i}</option>" for i in range(1, 11)])
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
@@ -2454,34 +2443,25 @@ def player_detail_page(player_id: int, request: Request):
 
     pid, name, team, position, status, notes, photo_url = row
     photo_src = html.escape(photo_url or player_photo_placeholder(name))
-    return page(
-        f"<div class='card' style='max-width:980px;margin:0 auto;'>"
-        f"<div style='margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;'>"
-        f"<button type='button' onclick='history.back()' class='btn btn-secondary'>← Volver</button>"
-        f"<a class='btn' href='/edit/{pid}'>Editar jugadora</a>"
-        f"</div>"
-        f"<div style='display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);gap:28px;align-items:start;'>"
-        f"<div class='card' style='margin:0;background:#f8fbff;border:1px solid #dbe7ff;'>"
-        f"<div style='border-radius:20px;overflow:hidden;background:#e5e7eb;aspect-ratio:4/5;'>"
-        f"<img src='{photo_src}' alt='{html.escape(name or '')}' style='width:100%;height:100%;object-fit:cover;display:block;'>"
-        f"</div>"
+
+    content = (
+        f"<div class='topbar'><div><h1>Ficha · {html.escape(name or '')}</h1><div class='muted'>Jugadora de plantilla · ID #{pid}</div></div>"
+        f"<div class='actions-toolbar'><button type='button' class='btn btn-secondary' onclick='history.back()'>Volver</button><a class='btn' href='/edit/{pid}'>Editar jugadora</a></div></div>"
+        f"<div class='grid-2'><div>"
+        f"<div class='card'><h2>Datos básicos</h2><div class='grid'>"
+        f"<div><label>Nombre</label><input value='{html.escape(name or '')}' readonly></div>"
+        f"<div><label>Equipo actual</label><input value='{html.escape(team or '')}' readonly></div>"
+        f"<div><label>Posición</label><input value='{html.escape(position or '')}' readonly></div>"
+        f"<div><label>Estado</label><input value='{html.escape(status or '')}' readonly></div>"
+        f"</div></div>"
+        f"<div class='card'><h2>Observaciones</h2><div style='white-space:pre-wrap;line-height:1.7;color:#374151;'>{html.escape(notes or 'Sin notas registradas.')}</div></div>"
         f"</div>"
         f"<div>"
-        f"<h1 style='margin:0 0 12px;font-size:34px;color:#142850;'>{html.escape(name or '')}</h1>"
-        f"<div style='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:18px;'>"
-        f"<div class='card' style='margin:0;'><div class='muted'>Equipo actual</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{html.escape(team or '-')}</div></div>"
-        f"<div class='card' style='margin:0;'><div class='muted'>Posición</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{html.escape(position or '-')}</div></div>"
-        f"<div class='card' style='margin:0;'><div class='muted'>Estado</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{html.escape(status or '-')}</div></div>"
-        f"<div class='card' style='margin:0;'><div class='muted'>ID interna</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>#{pid}</div></div>"
-        f"</div>"
-        f"<div class='card' style='margin:0;'>"
-        f"<h2 style='margin-top:0;'>Notas</h2>"
-        f"<div style='white-space:pre-wrap;line-height:1.6;color:#374151;'>{html.escape(notes or 'Sin notas registradas.')}</div>"
-        f"</div>"
-        f"</div>"
-        f"</div>"
-        f"</div>"
+        f"<div class='card'><h2>Fotografía</h2><div style='margin-top:8px;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;background:#f3f4f6;'><img src='{photo_src}' alt='{html.escape(name or '')}' style='width:100%;display:block;aspect-ratio:4/5;object-fit:cover;'></div></div>"
+        f"<div class='card'><h2>Acciones</h2><div class='actions-toolbar'><a class='btn' href='/edit/{pid}'>Editar ficha</a><button type='button' class='btn btn-secondary' onclick='history.back()'>Volver</button></div></div>"
+        f"</div></div>"
     )
+    return page(content)
 
 
 @app.get("/edit/{player_id}", response_class=HTMLResponse)
@@ -2498,14 +2478,12 @@ def edit_page(player_id: int, request: Request):
         return page("<div class='card'><h2>No encontrada</h2><a class='btn' href='/'>Volver</a></div>")
 
     pid, name, team, position, status, notes, photo_url = row
-    return_to = safe_return_to(request.query_params.get("from") or request.headers.get("referer") or "/", "/")
     status_options = "".join([f"<option value='{s}' {'selected' if s==status else ''}>{s}</option>" for s in ['Disponible', 'Lesionada', 'No disponible']])
 
     photo_preview = f"<div style='margin:14px 0 8px;'><img src='{html.escape(photo_url)}' style='width:180px;height:220px;object-fit:cover;border-radius:18px;border:1px solid #dbe3f0;box-shadow:0 10px 24px rgba(15,23,42,.10);'></div>" if photo_url else "<div class='muted' style='margin-top:10px;'>Todavía no hay foto subida.</div>"
 
     return page(
         f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post' enctype='multipart/form-data'>"
-        f"<input type='hidden' name='return_to' value='{html.escape(return_to)}'>"
         f"<div class='grid'><div><label>Nombre</label><input name='name' value='{html.escape(name or '')}' required></div>"
         f"<div><label>Equipo actual</label><input name='team' value='{html.escape(team or '')}'></div>"
         f"<div><label>Posición</label><select name='position'>"
@@ -2529,10 +2507,9 @@ def edit_page(player_id: int, request: Request):
 
 
 @app.post("/update/{player_id}")
-def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form(""), return_to: str = Form("/"), remove_photo: str = Form(""), photo_file: UploadFile | None = File(None)):
+def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form(""), remove_photo: str = Form(""), photo_file: UploadFile | None = File(None)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
-    redirect_target = safe_return_to(return_to, "/")
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
@@ -2553,7 +2530,7 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
         except ValueError as exc:
             cur.close()
             conn.close()
-            return page(f"<div class='card'><h2>Error al subir la foto</h2><p>{html.escape(str(exc))}</p><a class='btn' href='/edit/{player_id}?from={quote(redirect_target, safe="/?=&-%#")}'>Volver</a></div>")
+            return page(f"<div class='card'><h2>Error al subir la foto</h2><p>{html.escape(str(exc))}</p><a class='btn' href='/edit/{player_id}'>Volver</a></div>")
 
     cur.execute(
         "UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s, photo_url=%s WHERE id=%s",
@@ -2562,7 +2539,7 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
     conn.commit()
     cur.close()
     conn.close()
-    return RedirectResponse(redirect_target, status_code=303)
+    return RedirectResponse(f"/edit/{player_id}", status_code=303)
 
 
 @app.post("/delete-player/{player_id}")
