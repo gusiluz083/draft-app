@@ -48,6 +48,19 @@ def get_conn():
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
         cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS photo_url TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS secondary_position TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS age INTEGER")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS rating INTEGER")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS dominant_foot TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS physical_status TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS squad_role TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS strengths TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS weaknesses TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS staff_assessment TEXT")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS season_matches INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS season_goals INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS season_assists INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS season_minutes INTEGER DEFAULT 0")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_board_state (
@@ -1072,8 +1085,8 @@ def render_plantilla_gallery(board_team: str) -> str:
         badge = "<span class='player-badge'>Plantilla</span>" if has_player else "<span class='player-badge muted-badge'>Libre</span>"
         action_html = (
             f"<div class='player-card-actions'>"
-            f"<a class='mini-btn mini-btn-light' href='/player/{player['id']}'>Ver ficha</a>"
-            f"<a class='mini-btn' href='/edit/{player['id']}'>Editar</a>"
+            f"<a class='mini-btn mini-btn-light' href='/player/{player['id']}?from=/plantilla'>Ver ficha</a>"
+            f"<a class='mini-btn' href='/edit/{player['id']}?from=/plantilla'>Editar</a>"
             f"</div>"
         ) if has_player else ""
         cards.append(
@@ -1321,7 +1334,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for pid, name, team, position, status, notes in players:
             search_blob = " ".join([name or "", team or "", position or "", status or "", notes or ""])
             actions = "".join([
-                f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>",
+                f"<a class='btn btn-light action-btn' href='/edit/{pid}?from=/player/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
@@ -1352,7 +1365,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
             search_blob = " ".join([name or "", team or "", position or "", decision_status or "", notes or ""])
             round_display = draft_round if draft_round else ""
-            actions = [f"<a class='btn btn-light action-btn' href='/edit/{pid}'>Editar</a>"]
+            actions = [f"<a class='btn btn-light action-btn' href='/edit/{pid}?from=/player/{pid}'>Editar</a>"]
             if tab == "objectives":
                 opts = "<option value=''>Ronda</option>" + "".join([f"<option value='{i}' {'selected' if draft_round==i else ''}>{i}</option>" for i in range(1, 11)])
                 order_opts = "<option value=''>Orden</option>" + "".join([f"<option value='{i}' {'selected' if round_order==i else ''}>{i}</option>" for i in range(1, 17)])
@@ -2432,68 +2445,183 @@ def save_wildcard(request: Request, name: str = Form("")):
 def player_detail_page(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    origin = (request.query_params.get("from") or "").strip()
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,''), COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
+    cur.execute(
+        """
+        SELECT
+            id, name, team, position, status, COALESCE(notes,''), COALESCE(photo_url, ''),
+            COALESCE(secondary_position, ''), age, rating, COALESCE(dominant_foot, ''),
+            COALESCE(physical_status, ''), COALESCE(squad_role, ''), COALESCE(strengths, ''),
+            COALESCE(weaknesses, ''), COALESCE(staff_assessment, ''),
+            COALESCE(season_matches, 0), COALESCE(season_goals, 0),
+            COALESCE(season_assists, 0), COALESCE(season_minutes, 0)
+        FROM players
+        WHERE id=%s
+        """,
+        (player_id,),
+    )
     row = cur.fetchone()
     cur.close()
     conn.close()
     if not row:
         return page("<div class='card'><h2>No encontrada</h2><button type='button' class='btn btn-secondary' onclick='history.back()'>← Volver</button></div>")
 
-    pid, name, team, position, status, notes, photo_url = row
-    photo_src = html.escape(photo_url or player_photo_placeholder(name))
+    (
+        pid, name, team, position, status, notes, photo_url,
+        secondary_position, age, rating, dominant_foot, physical_status, squad_role,
+        strengths, weaknesses, staff_assessment, season_matches, season_goals,
+        season_assists, season_minutes
+    ) = row
 
-    content = (
-        f"<div class='topbar'><div><h1>Ficha · {html.escape(name or '')}</h1><div class='muted'>Jugadora de plantilla · ID #{pid}</div></div>"
-        f"<div class='actions-toolbar'><button type='button' class='btn btn-secondary' onclick='history.back()'>Volver</button><a class='btn' href='/edit/{pid}'>Editar jugadora</a></div></div>"
-        f"<div class='grid-2'><div>"
-        f"<div class='card'><h2>Datos básicos</h2><div class='grid'>"
-        f"<div><label>Nombre</label><input value='{html.escape(name or '')}' readonly></div>"
-        f"<div><label>Equipo actual</label><input value='{html.escape(team or '')}' readonly></div>"
-        f"<div><label>Posición</label><input value='{html.escape(position or '')}' readonly></div>"
-        f"<div><label>Estado</label><input value='{html.escape(status or '')}' readonly></div>"
-        f"</div></div>"
-        f"<div class='card'><h2>Observaciones</h2><div style='white-space:pre-wrap;line-height:1.7;color:#374151;'>{html.escape(notes or 'Sin notas registradas.')}</div></div>"
+    def nice(v, fallback="-"):
+        if v is None:
+            return fallback
+        s = str(v).strip()
+        return html.escape(s if s else fallback)
+
+    photo_src = html.escape(photo_url or player_photo_placeholder(name))
+    edit_href = f"/edit/{pid}"
+    if origin:
+        edit_href += f"?from={quote(origin, safe='/?:=&')}"
+    return page(
+        f"<div class='card' style='max-width:1180px;margin:0 auto;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);'>"
+        f"<div style='display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:22px;'>"
+        f"<button type='button' onclick='history.back()' class='btn btn-secondary'>← Volver</button>"
+        f"<a class='btn' href='{edit_href}'>Editar jugadora</a>"
         f"</div>"
-        f"<div>"
-        f"<div class='card'><h2>Fotografía</h2><div style='margin-top:8px;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;background:#f3f4f6;'><img src='{photo_src}' alt='{html.escape(name or '')}' style='width:100%;display:block;aspect-ratio:4/5;object-fit:cover;'></div></div>"
-        f"<div class='card'><h2>Acciones</h2><div class='actions-toolbar'><a class='btn' href='/edit/{pid}'>Editar ficha</a><button type='button' class='btn btn-secondary' onclick='history.back()'>Volver</button></div></div>"
-        f"</div></div>"
+        f"<div style='display:grid;grid-template-columns:minmax(290px,350px) minmax(0,1fr);gap:28px;align-items:start;'>"
+        f"<div style='display:grid;gap:18px;'>"
+        f"<div class='card' style='margin:0;background:#f8fbff;border:1px solid #dbe7ff;'>"
+        f"<div style='border-radius:22px;overflow:hidden;background:#e5e7eb;aspect-ratio:4/5;'>"
+        f"<img src='{photo_src}' alt='{html.escape(name or '')}' style='width:100%;height:100%;object-fit:cover;display:block;'>"
+        f"</div>"
+        f"</div>"
+        f"<div class='card' style='margin:0;'>"
+        f"<h3 style='margin:0 0 10px;color:#142850;'>Fotografía</h3>"
+        f"<div class='muted'>Imagen principal de ficha y galería de plantilla.</div>"
+        f"</div>"
+        f"</div>"
+        f"<div style='display:grid;gap:18px;'>"
+        f"<div class='card' style='margin:0;'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;'>"
+        f"<div><div class='muted' style='font-weight:800;letter-spacing:.03em;text-transform:uppercase;'>Ficha de jugadora</div><h1 style='margin:6px 0 0;font-size:36px;color:#142850;'>{html.escape(name or '')}</h1></div>"
+        f"<div style='padding:10px 16px;border-radius:999px;background:#eef4ff;color:#1b2f63;font-weight:800;'>#{pid}</div>"
+        f"</div>"
+        f"</div>"
+        f"<div class='card' style='margin:0;'>"
+        f"<h2 style='margin-top:0;color:#142850;'>Datos deportivos</h2>"
+        f"<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;'>"
+        f"<div><div class='muted'>Equipo actual</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(team)}</div></div>"
+        f"<div><div class='muted'>Posición principal</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(position)}</div></div>"
+        f"<div><div class='muted'>Posición secundaria</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(secondary_position)}</div></div>"
+        f"<div><div class='muted'>Edad</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(age)}</div></div>"
+        f"<div><div class='muted'>Nivel / media</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(rating)}</div></div>"
+        f"<div><div class='muted'>Pierna dominante</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(dominant_foot)}</div></div>"
+        f"</div>"
+        f"</div>"
+        f"<div class='card' style='margin:0;'>"
+        f"<h2 style='margin-top:0;color:#142850;'>Rol y estado</h2>"
+        f"<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;'>"
+        f"<div><div class='muted'>Estado jugadora</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(status)}</div></div>"
+        f"<div><div class='muted'>Estado físico</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(physical_status)}</div></div>"
+        f"<div><div class='muted'>Rol en el equipo</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{nice(squad_role)}</div></div>"
+        f"</div>"
+        f"</div>"
+        f"<div style='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;'>"
+        f"<div class='card' style='margin:0;'><h2 style='margin-top:0;color:#142850;'>Seguimiento técnico</h2><div class='muted' style='margin-bottom:8px;'>Fortalezas</div><div style='white-space:pre-wrap;line-height:1.6;color:#374151;'>{html.escape(strengths or 'Sin registrar.')}</div><hr style='border:none;border-top:1px solid #e5e7eb;margin:16px 0;'><div class='muted' style='margin-bottom:8px;'>Debilidades</div><div style='white-space:pre-wrap;line-height:1.6;color:#374151;'>{html.escape(weaknesses or 'Sin registrar.')}</div></div>"
+        f"<div class='card' style='margin:0;'><h2 style='margin-top:0;color:#142850;'>Observaciones staff</h2><div style='white-space:pre-wrap;line-height:1.6;color:#374151;'>{html.escape(staff_assessment or notes or 'Sin observaciones registradas.')}</div></div>"
+        f"</div>"
+        f"<div class='card' style='margin:0;'>"
+        f"<h2 style='margin-top:0;color:#142850;'>Datos de temporada</h2>"
+        f"<div style='display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;'>"
+        f"<div><div class='muted'>Partidos</div><div style='font-size:28px;font-weight:800;color:#1f2937;'>{int(season_matches or 0)}</div></div>"
+        f"<div><div class='muted'>Goles</div><div style='font-size:28px;font-weight:800;color:#1f2937;'>{int(season_goals or 0)}</div></div>"
+        f"<div><div class='muted'>Asistencias</div><div style='font-size:28px;font-weight:800;color:#1f2937;'>{int(season_assists or 0)}</div></div>"
+        f"<div><div class='muted'>Minutos</div><div style='font-size:28px;font-weight:800;color:#1f2937;'>{int(season_minutes or 0)}</div></div>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
     )
-    return page(content)
 
 
 @app.get("/edit/{player_id}", response_class=HTMLResponse)
 def edit_page(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+    from_url = (request.query_params.get("from") or "").strip()
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,''), COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
+    cur.execute(
+        """
+        SELECT
+            id, name, team, position, status, COALESCE(notes,''), COALESCE(photo_url, ''),
+            COALESCE(secondary_position, ''), age, rating, COALESCE(dominant_foot, ''),
+            COALESCE(physical_status, ''), COALESCE(squad_role, ''), COALESCE(strengths, ''),
+            COALESCE(weaknesses, ''), COALESCE(staff_assessment, ''),
+            COALESCE(season_matches, 0), COALESCE(season_goals, 0),
+            COALESCE(season_assists, 0), COALESCE(season_minutes, 0)
+        FROM players
+        WHERE id=%s
+        """,
+        (player_id,),
+    )
     row = cur.fetchone()
     cur.close()
     conn.close()
     if not row:
         return page("<div class='card'><h2>No encontrada</h2><a class='btn' href='/'>Volver</a></div>")
 
-    pid, name, team, position, status, notes, photo_url = row
+    (
+        pid, name, team, position, status, notes, photo_url,
+        secondary_position, age, rating, dominant_foot, physical_status, squad_role,
+        strengths, weaknesses, staff_assessment, season_matches, season_goals,
+        season_assists, season_minutes
+    ) = row
+
     status_options = "".join([f"<option value='{s}' {'selected' if s==status else ''}>{s}</option>" for s in ['Disponible', 'Lesionada', 'No disponible']])
+    physical_options = "".join([f"<option value='{s}' {'selected' if s==(physical_status or '') else ''}>{s}</option>" for s in ['', 'Disponible', 'Tocada', 'Recuperación', 'Lesionada']])
+    role_options = "".join([f"<option value='{s}' {'selected' if s==(squad_role or '') else ''}>{s}</option>" for s in ['', 'Titular', 'Rotación', 'Banquillo', 'Lesionada']])
+    foot_options = "".join([f"<option value='{s}' {'selected' if s==(dominant_foot or '') else ''}>{s}</option>" for s in ['', 'Derecha', 'Izquierda', 'Ambas']])
 
     photo_preview = f"<div style='margin:14px 0 8px;'><img src='{html.escape(photo_url)}' style='width:180px;height:220px;object-fit:cover;border-radius:18px;border:1px solid #dbe3f0;box-shadow:0 10px 24px rgba(15,23,42,.10);'></div>" if photo_url else "<div class='muted' style='margin-top:10px;'>Todavía no hay foto subida.</div>"
-
+    cancel_href = html.escape(from_url or f"/player/{pid}")
     return page(
-        f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post' enctype='multipart/form-data'>"
-        f"<div class='grid'><div><label>Nombre</label><input name='name' value='{html.escape(name or '')}' required></div>"
+        f"<div class='card' style='max-width:1180px;margin:0 auto;'>"
+        f"<div style='display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;'><button type='button' onclick='history.back()' class='btn btn-secondary'>← Volver</button></div>"
+        f"<h1>Editar jugadora</h1>"
+        f"<form action='/update/{pid}' method='post' enctype='multipart/form-data'>"
+        f"<input type='hidden' name='from_url' value='{html.escape(from_url)}'>"
+        f"<div class='grid'>"
+        f"<div><label>Nombre</label><input name='name' value='{html.escape(name or '')}' required></div>"
         f"<div><label>Equipo actual</label><input name='team' value='{html.escape(team or '')}'></div>"
-        f"<div><label>Posición</label><select name='position'>"
+        f"<div><label>Posición principal</label><select name='position'>"
         f"<option value='Portera' {'selected' if position == 'Portera' else ''}>Portera</option>"
         f"<option value='Defensa' {'selected' if position == 'Defensa' else ''}>Defensa</option>"
         f"<option value='Medio' {'selected' if position == 'Medio' else ''}>Medio</option>"
         f"<option value='Delantera' {'selected' if position == 'Delantera' else ''}>Delantera</option>"
         f"</select></div>"
-        f"<div><label>Estado jugadora</label><select name='status'>{status_options}</select></div></div>"
+        f"<div><label>Posición secundaria</label><input name='secondary_position' value='{html.escape(secondary_position or '')}' placeholder='Ej. Medio'></div>"
+        f"<div><label>Edad</label><input type='number' min='0' max='60' name='age' value='{'' if age is None else int(age)}'></div>"
+        f"<div><label>Nivel / media</label><input type='number' min='0' max='100' name='rating' value='{'' if rating is None else int(rating)}'></div>"
+        f"<div><label>Pierna dominante</label><select name='dominant_foot'>{foot_options}</select></div>"
+        f"<div><label>Estado jugadora</label><select name='status'>{status_options}</select></div>"
+        f"<div><label>Estado físico</label><select name='physical_status'>{physical_options}</select></div>"
+        f"<div><label>Rol en el equipo</label><select name='squad_role'>{role_options}</select></div>"
+        f"</div>"
         f"<div style='margin-top:12px;'><label>Notas</label><textarea name='notes'>{html.escape(notes or '')}</textarea></div>"
+        f"<div class='grid' style='margin-top:12px;'>"
+        f"<div><label>Fortalezas</label><textarea name='strengths'>{html.escape(strengths or '')}</textarea></div>"
+        f"<div><label>Debilidades</label><textarea name='weaknesses'>{html.escape(weaknesses or '')}</textarea></div>"
+        f"<div><label>Última valoración staff</label><textarea name='staff_assessment'>{html.escape(staff_assessment or '')}</textarea></div>"
+        f"<div><label>Partidos</label><input type='number' min='0' name='season_matches' value='{int(season_matches or 0)}'></div>"
+        f"<div><label>Goles</label><input type='number' min='0' name='season_goals' value='{int(season_goals or 0)}'></div>"
+        f"<div><label>Asistencias</label><input type='number' min='0' name='season_assists' value='{int(season_assists or 0)}'></div>"
+        f"<div><label>Minutos</label><input type='number' min='0' name='season_minutes' value='{int(season_minutes or 0)}'></div>"
+        f"</div>"
         f"<div class='card' style='margin-top:18px;background:#f8fbff;border:1px solid #dbe7ff;'>"
         f"<h2 style='margin-top:0;'>Fotografía</h2>"
         f"<div class='muted'>Sube una imagen JPG, PNG o WEBP. Recomendado: formato vertical o cuadrado.</div>"
@@ -2501,15 +2629,56 @@ def edit_page(player_id: int, request: Request):
         f"<label>Nueva foto</label><input type='file' name='photo_file' accept='.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp'>"
         f"<div style='margin-top:10px;display:flex;align-items:center;gap:8px;'><input id='remove_photo' type='checkbox' name='remove_photo' value='1' style='width:auto;'><label for='remove_photo' style='margin:0;'>Eliminar foto actual</label></div>"
         f"</div>"
-        f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar cambios</button><a class='btn btn-secondary' href='/'>Cancelar</a></div>"
+        f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar cambios</button><a class='btn btn-secondary' href='{cancel_href}'>Cancelar</a></div>"
         f"</form></div>"
     )
 
 
 @app.post("/update/{player_id}")
-def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form(""), remove_photo: str = Form(""), photo_file: UploadFile | None = File(None)):
+def update_player(
+    player_id: int,
+    request: Request,
+    name: str = Form(...),
+    team: str = Form(""),
+    position: str = Form(""),
+    secondary_position: str = Form(""),
+    age: str = Form(""),
+    rating: str = Form(""),
+    dominant_foot: str = Form(""),
+    status: str = Form("Disponible"),
+    physical_status: str = Form(""),
+    squad_role: str = Form(""),
+    notes: str = Form(""),
+    strengths: str = Form(""),
+    weaknesses: str = Form(""),
+    staff_assessment: str = Form(""),
+    season_matches: str = Form("0"),
+    season_goals: str = Form("0"),
+    season_assists: str = Form("0"),
+    season_minutes: str = Form("0"),
+    from_url: str = Form(""),
+    remove_photo: str = Form(""),
+    photo_file: UploadFile | None = File(None)
+):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
+
+    def to_int(value, default=0):
+        try:
+            s = str(value).strip()
+            if s == "":
+                return default
+            return int(s)
+        except Exception:
+            return default
+
+    age_value = None if str(age).strip() == "" else max(0, to_int(age, 0))
+    rating_value = None if str(rating).strip() == "" else max(0, min(100, to_int(rating, 0)))
+    matches_value = max(0, to_int(season_matches, 0))
+    goals_value = max(0, to_int(season_goals, 0))
+    assists_value = max(0, to_int(season_assists, 0))
+    minutes_value = max(0, to_int(season_minutes, 0))
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
@@ -2533,13 +2702,43 @@ def update_player(player_id: int, request: Request, name: str = Form(...), team:
             return page(f"<div class='card'><h2>Error al subir la foto</h2><p>{html.escape(str(exc))}</p><a class='btn' href='/edit/{player_id}'>Volver</a></div>")
 
     cur.execute(
-        "UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s, photo_url=%s WHERE id=%s",
-        (name.strip(), team.strip(), position.strip(), status, notes.strip(), new_photo, player_id)
+        """
+        UPDATE players
+        SET
+            name=%s,
+            team=%s,
+            position=%s,
+            secondary_position=%s,
+            age=%s,
+            rating=%s,
+            dominant_foot=%s,
+            status=%s,
+            physical_status=%s,
+            squad_role=%s,
+            notes=%s,
+            strengths=%s,
+            weaknesses=%s,
+            staff_assessment=%s,
+            season_matches=%s,
+            season_goals=%s,
+            season_assists=%s,
+            season_minutes=%s,
+            photo_url=%s
+        WHERE id=%s
+        """,
+        (
+            name.strip(), team.strip(), position.strip(), secondary_position.strip(),
+            age_value, rating_value, dominant_foot.strip(), status, physical_status.strip(),
+            squad_role.strip(), notes.strip(), strengths.strip(), weaknesses.strip(),
+            staff_assessment.strip(), matches_value, goals_value, assists_value,
+            minutes_value, new_photo, player_id
+        )
     )
     conn.commit()
     cur.close()
     conn.close()
-    return RedirectResponse(f"/edit/{player_id}", status_code=303)
+    redirect_to = (from_url or "").strip() or f"/player/{player_id}"
+    return RedirectResponse(redirect_to, status_code=303)
 
 
 @app.post("/delete-player/{player_id}")
