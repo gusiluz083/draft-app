@@ -4,6 +4,8 @@ import io
 import html
 import hashlib
 import json
+import calendar as pycalendar
+from datetime import date, datetime
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
@@ -59,6 +61,20 @@ def get_conn():
                 current_pick INTEGER,
                 next_pick INTEGER,
                 UNIQUE(board_team)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS calendar_events (
+                id SERIAL PRIMARY KEY,
+                board_team TEXT NOT NULL,
+                event_date DATE NOT NULL,
+                event_type TEXT NOT NULL DEFAULT 'Otro',
+                title TEXT NOT NULL,
+                event_time TEXT DEFAULT '',
+                notes TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -203,6 +219,20 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS calendar_events (
+            id SERIAL PRIMARY KEY,
+            board_team TEXT NOT NULL,
+            event_date DATE NOT NULL,
+            event_type TEXT NOT NULL DEFAULT 'Otro',
+            title TEXT NOT NULL,
+            event_time TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     conn.commit()
     cur.close()
     conn.close()
@@ -336,6 +366,46 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 @media (max-width:980px) { .board-shell { grid-template-columns:1fr; } .plantilla-module-nav { grid-template-columns:repeat(2, minmax(180px, 1fr)); } }
 @media (max-width:900px) { .grid,.grid-2,.grid-3,.team-cards,.stats { grid-template-columns:1fr; } }
 @media (max-width:640px) { .plantilla-module-nav { grid-template-columns:1fr; } .plantilla-module-card { padding:16px 18px; } .section-hero { padding:40px 20px; } .section-hero h2 { font-size:28px; } }
+
+.calendar-shell { display:grid; grid-template-columns: minmax(0,1.55fr) minmax(320px,0.95fr); gap:18px; align-items:start; }
+.calendar-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+.calendar-toolbar .month-badge { background:linear-gradient(135deg,#1d4ed8,#2563eb); color:white; padding:12px 18px; border-radius:14px; font-weight:800; font-size:22px; box-shadow:0 12px 24px rgba(37,99,235,0.20); }
+.calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:10px; }
+.calendar-weekday { text-align:center; font-size:12px; font-weight:800; text-transform:uppercase; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; padding:10px 6px; border-radius:12px; letter-spacing:.04em; }
+.calendar-day { min-height:150px; background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%); border:1px solid #dbe6f3; border-radius:18px; padding:12px; display:flex; flex-direction:column; gap:10px; box-shadow:0 8px 20px rgba(15,23,42,0.04); }
+.calendar-day.muted { opacity:.42; background:#f8fafc; }
+.calendar-day.today { border:2px solid #2563eb; box-shadow:0 10px 24px rgba(37,99,235,0.18); }
+.calendar-day-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.calendar-day-number { font-size:18px; font-weight:800; color:#0f172a; }
+.calendar-add-link { font-size:12px; color:#2563eb; text-decoration:none; font-weight:700; background:#eff6ff; padding:6px 9px; border-radius:999px; }
+.calendar-events { display:flex; flex-direction:column; gap:8px; }
+.calendar-event { border-radius:12px; padding:9px 10px; font-size:12px; line-height:1.3; color:#0f172a; border:1px solid rgba(15,23,42,0.06); }
+.calendar-event .event-time { font-weight:800; display:block; margin-bottom:3px; }
+.calendar-event .event-title { font-weight:700; display:block; }
+.calendar-event .event-type { display:inline-block; margin-top:5px; font-size:11px; font-weight:700; opacity:.85; }
+.event-partido { background:#fee2e2; }
+.event-entrenamiento { background:#dcfce7; }
+.event-reunión { background:#ede9fe; }
+.event-viaje { background:#fef3c7; }
+.event-médico { background:#cffafe; }
+.event-otro { background:#e2e8f0; }
+.calendar-side-card h3 { margin-bottom:8px; }
+.calendar-side-card .muted { line-height:1.45; }
+.calendar-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.calendar-form-grid .full { grid-column:1 / -1; }
+.mini-list { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
+.mini-event { border:1px solid #e2e8f0; border-radius:14px; padding:12px; background:#fff; }
+.mini-event strong { display:block; margin-bottom:4px; }
+.inline-delete { margin-top:8px; }
+@media (max-width: 1100px) { .calendar-shell { grid-template-columns:1fr; } }
+@media (max-width: 720px) {
+  body { padding:14px; }
+  .calendar-grid { gap:8px; }
+  .calendar-day { min-height:125px; padding:10px; }
+  .calendar-form-grid { grid-template-columns:1fr; }
+  .calendar-toolbar .month-badge { width:100%; text-align:center; }
+}
+
 </style>
 """
 
@@ -606,6 +676,249 @@ def get_team(request: Request):
         return team if team in allowed else (allowed[0] if allowed else None)
     team = request.cookies.get(TEAM_COOKIE, "")
     return team if team in TEAMS else None
+
+
+
+
+CALENDAR_EVENT_TYPES = ["Partido", "Entrenamiento", "Reunión", "Viaje", "Médico", "Otro"]
+WEEKDAY_LABELS = ["L", "M", "X", "J", "V", "S", "D"]
+
+
+def normalize_calendar_month(year: int | None, month: int | None):
+    today = date.today()
+    y = year or today.year
+    m = month or today.month
+    while m < 1:
+        m += 12
+        y -= 1
+    while m > 12:
+        m -= 12
+        y += 1
+    return y, m
+
+
+def previous_month(year: int, month: int):
+    return (year - 1, 12) if month == 1 else (year, month - 1)
+
+
+def next_month(year: int, month: int):
+    return (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def get_calendar_events_for_month(board_team: str, year: int, month: int):
+    start_date = date(year, month, 1)
+    end_date = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, event_date, event_type, title, COALESCE(event_time, ''), COALESCE(notes, '')
+        FROM calendar_events
+        WHERE board_team = %s AND event_date >= %s AND event_date < %s
+        ORDER BY event_date ASC, NULLIF(event_time, '') ASC, id ASC
+        """,
+        (board_team, start_date, end_date),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    grouped = {}
+    for event_id, event_date, event_type, title, event_time, notes in rows:
+        grouped.setdefault(event_date.isoformat(), []).append(
+            {
+                "id": event_id,
+                "date": event_date.isoformat(),
+                "type": event_type or "Otro",
+                "title": title,
+                "time": event_time or "",
+                "notes": notes or "",
+            }
+        )
+    return grouped
+
+
+def create_calendar_event(board_team: str, event_date_str: str, event_type: str, title: str, event_time: str, notes: str):
+    parsed_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
+    clean_type = event_type if event_type in CALENDAR_EVENT_TYPES else "Otro"
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO calendar_events (board_team, event_date, event_type, title, event_time, notes)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (board_team, parsed_date, clean_type, title.strip(), (event_time or "").strip(), (notes or "").strip()),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def delete_calendar_event(board_team: str, event_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM calendar_events WHERE id = %s AND board_team = %s", (event_id, board_team))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def render_calendar_page(request: Request, board_team: str, year: int | None = None, month: int | None = None, selected_date: str | None = None):
+    year, month = normalize_calendar_month(year, month)
+    calendar_matrix = pycalendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
+    month_events = get_calendar_events_for_month(board_team, year, month)
+    prev_year, prev_month = previous_month(year, month)
+    next_year_value, next_month_value = next_month(year, month)
+    today = date.today()
+    selected_date = selected_date or date(year, month, 1).isoformat()
+    try:
+        datetime.strptime(selected_date, "%Y-%m-%d")
+    except ValueError:
+        selected_date = date(year, month, 1).isoformat()
+
+    event_type_styles = {
+        "Partido": "event-partido",
+        "Entrenamiento": "event-entrenamiento",
+        "Reunión": "event-reunión",
+        "Viaje": "event-viaje",
+        "Médico": "event-médico",
+        "Otro": "event-otro",
+    }
+
+    weekday_html = "".join(f"<div class='calendar-weekday'>{label}</div>" for label in WEEKDAY_LABELS)
+    day_cells = []
+    for week in calendar_matrix:
+        for day_value in week:
+            day_iso = day_value.isoformat()
+            events = month_events.get(day_iso, [])
+            event_html = ""
+            if events:
+                cards = []
+                for event in events[:3]:
+                    style_class = event_type_styles.get(event["type"], "event-otro")
+                    time_html = f"<span class='event-time'>{html.escape(event['time'])}</span>" if event["time"] else ""
+                    cards.append(
+                        f"<div class='calendar-event {style_class}'>"
+                        f"{time_html}"
+                        f"<span class='event-title'>{html.escape(event['title'])}</span>"
+                        f"<span class='event-type'>{html.escape(event['type'])}</span>"
+                        f"</div>"
+                    )
+                if len(events) > 3:
+                    cards.append(f"<div class='muted' style='font-size:12px;font-weight:700;'>+{len(events)-3} más</div>")
+                event_html = "<div class='calendar-events'>" + "".join(cards) + "</div>"
+            else:
+                event_html = "<div class='muted' style='font-size:12px;'>Sin eventos</div>"
+
+            classes = ["calendar-day"]
+            if day_value.month != month:
+                classes.append("muted")
+            if day_value == today:
+                classes.append("today")
+            day_cells.append(
+                f"<div class='{' '.join(classes)}'>"
+                f"<div class='calendar-day-head'>"
+                f"<div class='calendar-day-number'>{day_value.day}</div>"
+                f"<a class='calendar-add-link' href='/plantilla/calendario?year={year}&month={month}&selected_date={day_iso}'>+ Evento</a>"
+                f"</div>"
+                f"{event_html}"
+                f"</div>"
+            )
+
+    selected_events = month_events.get(selected_date, [])
+    type_options = "".join(
+        f"<option value='{html.escape(event_type)}'>{html.escape(event_type)}</option>"
+        for event_type in CALENDAR_EVENT_TYPES
+    )
+    selected_events_html = "".join(
+        [
+            f"<div class='mini-event'>"
+            f"<strong>{html.escape(event['title'])}</strong>"
+            f"<div class='muted'>{html.escape(event['type'])}{' · ' + html.escape(event['time']) if event['time'] else ''}</div>"
+            f"{f'<div style="margin-top:6px;">{html.escape(event["notes"])}</div>' if event['notes'] else ''}"
+            f"<form method='post' action='/plantilla/calendario/delete' class='inline-delete'>"
+            f"<input type='hidden' name='event_id' value='{event['id']}'>"
+            f"<input type='hidden' name='year' value='{year}'>"
+            f"<input type='hidden' name='month' value='{month}'>"
+            f"<button class='btn btn-danger action-btn' type='submit'>Eliminar</button>"
+            f"</form>"
+            f"</div>"
+            for event in selected_events
+        ]
+    ) or "<div class='muted'>No hay eventos en este día todavía.</div>"
+
+    month_label = f"{pycalendar.month_name[month]} {year}"
+    month_label_es = (
+        month_label.replace("January", "Enero").replace("February", "Febrero").replace("March", "Marzo")
+        .replace("April", "Abril").replace("May", "Mayo").replace("June", "Junio").replace("July", "Julio")
+        .replace("August", "Agosto").replace("September", "Septiembre").replace("October", "Octubre")
+        .replace("November", "Noviembre").replace("December", "Diciembre")
+    )
+
+    hero = (
+        f"<div class='card section-hero' style='margin-top:18px;'>"
+        f"<div class='section-hero-icon'>📅</div>"
+        f"<h2>Calendario del equipo</h2>"
+        f"<p>Organiza partidos, entrenamientos, reuniones y cualquier evento importante sin salir de Draft Manager Queens.</p>"
+        f"<div class='section-note'>Calendario interno por equipo, guardado en PostgreSQL y listo para crecer con resultados y estadísticas.</div>"
+        f"</div>"
+    )
+
+    content = (
+        f"<div class='card'>"
+        f"<div class='topbar'>"
+        f"<div><h1>Gestión de Plantilla</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
+        f"<div style='display:flex;gap:10px;flex-wrap:wrap;'>"
+        f"<a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a>"
+        f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
+        f"<a class='btn btn-secondary' href='/logout'>Salir</a>"
+        f"</div>"
+        f"</div>"
+        f"<div class='card' style='margin-top:18px;'>"
+        f"<div style='display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:end;'>"
+        f"<div><h2 style='margin:0;'>Áreas del módulo</h2><div class='muted' style='margin-top:6px;'>Accesos directos para trabajar la plantilla de forma ordenada y profesional.</div></div>"
+        f"</div>"
+        f"<div class='plantilla-module-nav'>"
+        f"<a class='plantilla-module-card' href='/plantilla/plantilla'><div class='plantilla-module-icon'>📋</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Plantilla</div><div class='plantilla-module-subtitle'>Entrar en esta área</div></div></a>"
+        f"<a class='plantilla-module-card' href='/plantilla/estadisticas'><div class='plantilla-module-icon'>📊</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Estadísticas</div><div class='plantilla-module-subtitle'>Entrar en esta área</div></div></a>"
+        f"<a class='plantilla-module-card active' href='/plantilla/calendario'><div class='plantilla-module-icon'>📅</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Calendario</div><div class='plantilla-module-subtitle'>Sección activa del módulo</div></div></a>"
+        f"<a class='plantilla-module-card' href='/plantilla/resultados'><div class='plantilla-module-icon'>🏁</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Resultados</div><div class='plantilla-module-subtitle'>Entrar en esta área</div></div></a>"
+        f"</div>"
+        f"</div>"
+        f"{hero}"
+        f"<div class='calendar-shell'>"
+        f"<div class='card'>"
+        f"<div class='calendar-toolbar'>"
+        f"<a class='btn btn-secondary' href='/plantilla/calendario?year={prev_year}&month={prev_month}&selected_date={selected_date}'>← Mes anterior</a>"
+        f"<div class='month-badge'>{html.escape(month_label_es)}</div>"
+        f"<a class='btn btn-secondary' href='/plantilla/calendario?year={next_year_value}&month={next_month_value}&selected_date={selected_date}'>Mes siguiente →</a>"
+        f"</div>"
+        f"<div class='calendar-grid'>{weekday_html}{''.join(day_cells)}</div>"
+        f"</div>"
+        f"<div class='card calendar-side-card'>"
+        f"<h3>Añadir evento</h3>"
+        f"<div class='muted'>Guarda partidos, entrenamientos, reuniones y cualquier cita importante del equipo.</div>"
+        f"<form method='post' action='/plantilla/calendario/add' style='margin-top:16px;'>"
+        f"<div class='calendar-form-grid'>"
+        f"<div><label>Fecha</label><input type='date' name='event_date' value='{html.escape(selected_date)}' required></div>"
+        f"<div><label>Tipo</label><select name='event_type'>{type_options}</select></div>"
+        f"<div class='full'><label>Título</label><input type='text' name='title' placeholder='Ej. Partido vs Jijantas' required></div>"
+        f"<div><label>Hora</label><input type='time' name='event_time'></div>"
+        f"<div class='full'><label>Notas</label><textarea name='notes' placeholder='Detalles del evento, ubicación, rival, convocatoria...'></textarea></div>"
+        f"<input type='hidden' name='year' value='{year}'>"
+        f"<input type='hidden' name='month' value='{month}'>"
+        f"<button class='btn btn-success full' type='submit'>Guardar evento</button>"
+        f"</div>"
+        f"</form>"
+        f"<div class='mini-list'>"
+        f"<h3 style='margin:6px 0 0;'>Eventos del {html.escape(selected_date)}</h3>"
+        f"{selected_events_html}"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+    )
+    return page(content)
 
 
 def get_team_board_state(board_team: str):
@@ -1100,14 +1413,57 @@ def plantilla_section_estadisticas(request: Request):
 
 
 @app.get("/plantilla/calendario", response_class=HTMLResponse)
-def plantilla_section_calendario(request: Request):
-    return plantilla_section_page(
-        request,
-        "calendario",
-        "Calendario",
-        "📅",
-        "Aquí irá el calendario del equipo, con partidos, entrenamientos y eventos importantes de la temporada.",
-    )
+def plantilla_section_calendario(request: Request, year: int | None = None, month: int | None = None, selected_date: str | None = None):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    return render_calendar_page(request, board_team, year, month, selected_date)
+
+
+@app.post("/plantilla/calendario/add")
+def plantilla_calendar_add(
+    request: Request,
+    event_date: str = Form(...),
+    event_type: str = Form("Otro"),
+    title: str = Form(...),
+    event_time: str = Form(""),
+    notes: str = Form(""),
+    year: int = Form(...),
+    month: int = Form(...),
+):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    if title.strip():
+        create_calendar_event(board_team, event_date, event_type, title, event_time, notes)
+
+    return RedirectResponse(f"/plantilla/calendario?year={year}&month={month}&selected_date={event_date}", status_code=303)
+
+
+@app.post("/plantilla/calendario/delete")
+def plantilla_calendar_delete(
+    request: Request,
+    event_id: int = Form(...),
+    year: int = Form(...),
+    month: int = Form(...),
+):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+
+    delete_calendar_event(board_team, event_id)
+    return RedirectResponse(f"/plantilla/calendario?year={year}&month={month}", status_code=303)
+
 
 
 @app.get("/plantilla/resultados", response_class=HTMLResponse)
