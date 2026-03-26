@@ -4,13 +4,22 @@ import io
 import html
 import hashlib
 import json
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 import psycopg2
+import uuid
 
 app = FastAPI()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 SECRET_KEY = os.getenv("SECRET_KEY", "cambia-esto-en-render")
@@ -38,6 +47,7 @@ def get_conn():
         cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS photo_url TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_board_state (
@@ -113,7 +123,8 @@ def init_db():
             team TEXT,
             position TEXT,
             status TEXT DEFAULT 'Disponible',
-            notes TEXT DEFAULT ''
+            notes TEXT DEFAULT '',
+            photo_url TEXT DEFAULT ''
         )
         """
     )
@@ -990,6 +1001,174 @@ def select_module_page(request: Request):
     return page(content)
 
 
+
+def plantilla_module_nav(active: str) -> str:
+    items = [
+        ("plantilla", "Plantilla", "/plantilla"),
+        ("estadisticas", "Estadísticas", "/plantilla/estadisticas"),
+        ("calendario", "Calendario", "/plantilla/calendario"),
+        ("resultados", "Resultados", "/plantilla/resultados"),
+    ]
+    links = []
+    for key, label, href in items:
+        cls = "module-tab active" if key == active else "module-tab"
+        links.append(f"<a class='{cls}' href='{href}'>{html.escape(label)}</a>")
+    return "<div class='module-tabs'>" + "".join(links) + "</div>"
+
+
+def player_photo_placeholder(name: str) -> str:
+    safe_name = (name or "").strip() or "Jugadora"
+    initial = safe_name[:1].upper()
+    svg = f"""
+    <svg xmlns='http://www.w3.org/2000/svg' width='600' height='760' viewBox='0 0 600 760'>
+      <defs>
+        <linearGradient id='bg' x1='0' x2='1' y1='0' y2='1'>
+          <stop offset='0%' stop-color='#223b7b'/>
+          <stop offset='100%' stop-color='#0f172a'/>
+        </linearGradient>
+      </defs>
+      <rect width='600' height='760' fill='url(#bg)'/>
+      <circle cx='300' cy='275' r='110' fill='rgba(255,255,255,0.18)'/>
+      <path d='M160 620c22-108 102-167 140-167s118 59 140 167' fill='rgba(255,255,255,0.18)'/>
+      <text x='50%' y='92%' dominant-baseline='middle' text-anchor='middle'
+            font-family='Arial, sans-serif' font-size='86' font-weight='700' fill='rgba(255,255,255,0.92)'>{html.escape(initial)}</text>
+    </svg>
+    """
+    return "data:image/svg+xml;charset=utf-8," + quote(svg)
+
+
+def get_plantilla_players(board_team: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT p.id, p.name, COALESCE(p.position, ''), COALESCE(p.photo_url, '')
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team = %s AND d.status = 'Elegida'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        LIMIT 12
+        """,
+        (board_team,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    players = [{"id": r[0], "name": r[1], "position": r[2], "photo_url": r[3]} for r in rows]
+    while len(players) < 12:
+        players.append({"id": None, "name": "Hueco disponible", "position": "", "photo_url": ""})
+    return players
+
+
+def render_plantilla_gallery(board_team: str) -> str:
+    cards = []
+    for player in get_plantilla_players(board_team):
+        has_player = bool(player["id"])
+        photo = (player["photo_url"] or "").strip() if has_player else ""
+        img_src = html.escape(photo or player_photo_placeholder(player["name"]))
+        name = html.escape(player["name"])
+        subtitle = html.escape(player["position"] or ("Pendiente" if has_player else "Completa tu plantilla"))
+        extra_class = "" if has_player else " empty"
+        badge = "<span class='player-badge'>Plantilla</span>" if has_player else "<span class='player-badge muted-badge'>Libre</span>"
+        action_html = (
+            f"<div class='player-card-actions'>"
+            f"<a class='mini-btn mini-btn-light' href='/player/{player['id']}'>Ver ficha</a>"
+            f"<a class='mini-btn' href='/edit/{player['id']}'>Editar</a>"
+            f"</div>"
+        ) if has_player else ""
+        cards.append(
+            f"<article class='player-card{extra_class}'>"
+            f"{badge}"
+            f"<div class='player-photo-wrap'><img class='player-photo' src='{img_src}' alt='{name}'></div>"
+            f"<div class='player-info'><div class='player-name'>{name}</div><div class='player-subtitle'>{subtitle}</div>{action_html}</div>"
+            f"</article>"
+        )
+    return (
+        "<div class='gallery-header'>"
+        f"<div><h2 style='margin:0;'>Plantilla visual</h2><div class='muted'>Vista principal de 12 jugadoras para <strong>{html.escape(board_team)}</strong>. Cada tarjeta incluye acceso rápido a <strong>Ver ficha</strong> y <strong>Editar</strong>.</div></div>"
+        f"<div class='gallery-count'>12 plazas</div>"
+        "</div>"
+        "<div class='players-grid'>" + "".join(cards) + "</div>"
+    )
+
+
+
+
+def save_player_photo_file(upload: UploadFile, player_id: int) -> str:
+    original_name = (upload.filename or "").strip()
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise ValueError("Formato no permitido. Usa JPG, PNG o WEBP.")
+    token = uuid.uuid4().hex
+    filename = f"player_{player_id}_{token}{ext}"
+    absolute_path = os.path.join(UPLOADS_DIR, filename)
+    content = upload.file.read()
+    with open(absolute_path, "wb") as f:
+        f.write(content)
+    return f"/static/uploads/{filename}"
+
+
+def delete_local_photo_if_possible(photo_url: str) -> None:
+    photo_url = (photo_url or "").strip()
+    if not photo_url.startswith("/static/uploads/"):
+        return
+    absolute_path = os.path.join(BASE_DIR, photo_url.lstrip("/"))
+    try:
+        if os.path.exists(absolute_path):
+            os.remove(absolute_path)
+    except Exception:
+        pass
+
+def plantilla_layout(request: Request, board_team: str, active: str, body: str) -> str:
+    module_styles = """
+    <style>
+    .module-shell{padding:28px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);}
+    .module-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:22px;}
+    .module-hero h1{margin:0;font-size:34px;color:#142850;}
+    .module-actions{display:flex;gap:10px;flex-wrap:wrap;}
+    .module-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0 24px;}
+    .module-tab{display:flex;align-items:center;justify-content:center;padding:18px 14px;border-radius:18px;text-decoration:none;font-weight:800;font-size:18px;color:#1f3b73;background:linear-gradient(180deg,#eef4ff 0%,#e1ebff 100%);border:1px solid #d5e2ff;box-shadow:0 10px 24px rgba(31,59,115,0.08);transition:all .2s ease;}
+    .module-tab:hover{transform:translateY(-2px);box-shadow:0 14px 28px rgba(31,59,115,0.14);}
+    .module-tab.active{background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;border-color:#1b2f63;box-shadow:0 16px 32px rgba(27,47,99,0.28);}
+    .gallery-header{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+    .gallery-count{padding:10px 16px;border-radius:999px;background:#fff3e8;color:#b45309;font-weight:800;border:1px solid #fed7aa;}
+    .players-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px;}
+    .player-card{position:relative;overflow:hidden;border-radius:24px;background:#fff;border:1px solid #e5e7eb;box-shadow:0 14px 32px rgba(15,23,42,0.08);transition:transform .18s ease,box-shadow .18s ease;}
+    .player-card:hover{transform:translateY(-4px);box-shadow:0 22px 42px rgba(15,23,42,0.14);}
+    .player-card.empty{background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%);}
+    .player-photo-wrap{aspect-ratio:4/5;background:#e5e7eb;overflow:hidden;}
+    .player-photo{width:100%;height:100%;object-fit:cover;display:block;}
+    .player-info{padding:18px 18px 20px;}
+    .player-name{font-size:24px;font-weight:800;line-height:1.1;color:#1f2937;margin-bottom:6px;}
+    .player-subtitle{font-size:14px;color:#6b7280;font-weight:700;}
+    .player-card-actions{margin-top:14px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
+    .mini-btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:999px;background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;text-decoration:none;font-weight:800;font-size:13px;box-shadow:0 8px 18px rgba(27,47,99,0.22);border:1px solid transparent;transition:all .18s ease;}
+    .mini-btn:hover{opacity:.95;transform:translateY(-1px);}
+    .mini-btn-light{background:#ffffff;color:#1b2f63;border-color:#dbe3f0;box-shadow:0 8px 18px rgba(15,23,42,0.08);}
+    .mini-btn-light:hover{background:#f8fbff;}
+    .player-badge{position:absolute;top:14px;left:14px;padding:8px 12px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:12px;font-weight:800;z-index:2;box-shadow:0 6px 14px rgba(194,65,12,0.14);}
+    .muted-badge{background:#e5e7eb;color:#4b5563;box-shadow:none;}
+    .module-placeholder{padding:34px;border-radius:22px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid #e5e7eb;box-shadow:0 10px 30px rgba(15,23,42,0.06);}
+    .module-placeholder h2{margin-top:0;color:#142850;}
+    @media (max-width: 1200px){.players-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
+    @media (max-width: 900px){.module-tabs{grid-template-columns:repeat(2,minmax(0,1fr));}.players-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+    @media (max-width: 640px){.module-shell{padding:20px;}.module-tab{font-size:16px;padding:16px 12px;}.players-grid{grid-template-columns:1fr;}.player-name{font-size:22px;}}
+    </style>
+    """
+    content = (
+        module_styles +
+        f"<div class='card module-shell'>"
+        f"<div class='module-hero'>"
+        f"<div><h1>Gestión de Plantilla</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
+        f"<div class='module-actions'><a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
+        f"</div>"
+        f"{plantilla_module_nav(active)}"
+        f"{body}"
+        f"</div>"
+    )
+    return page(content)
+
+
 @app.get("/plantilla", response_class=HTMLResponse)
 def plantilla_home(request: Request):
     user = require_user(request)
@@ -998,20 +1177,59 @@ def plantilla_home(request: Request):
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
+    return plantilla_layout(request, board_team, "plantilla", render_plantilla_gallery(board_team))
 
-    content = (
-        f"<div class='card'>"
-        f"<div class='topbar'>"
-        f"<div><h1>Gestión de Plantilla</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
-        f"<div style='display:flex;gap:10px;flex-wrap:wrap;'><a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
-        f"</div>"
-        f"<div class='card' style='margin-top:18px;'>"
-        f"<h2>Nuevo módulo en construcción</h2>"
-        f"<div class='muted'>Aquí empezará la nueva Gestión de Plantilla de <strong>{html.escape(board_team)}</strong>. El módulo del DRAFT sigue estando intacto en su acceso habitual.</div>"
-        f"</div>"
-        f"</div>"
+
+@app.get("/plantilla/estadisticas", response_class=HTMLResponse)
+def plantilla_estadisticas(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    body = (
+        "<div class='module-placeholder'>"
+        "<h2>Estadísticas</h2>"
+        "<div class='muted'>Espacio preparado para métricas deportivas, medias y evolución del equipo.</div>"
+        "</div>"
     )
-    return page(content)
+    return plantilla_layout(request, board_team, "estadisticas", body)
+
+
+@app.get("/plantilla/calendario", response_class=HTMLResponse)
+def plantilla_calendario(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    body = (
+        "<div class='module-placeholder'>"
+        "<h2>Calendario</h2>"
+        "<div class='muted'>Página preparada para integrar partidos, entrenamientos y eventos del equipo.</div>"
+        "</div>"
+    )
+    return plantilla_layout(request, board_team, "calendario", body)
+
+
+@app.get("/plantilla/resultados", response_class=HTMLResponse)
+def plantilla_resultados(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    body = (
+        "<div class='module-placeholder'>"
+        "<h2>Resultados</h2>"
+        "<div class='muted'>Página preparada para llevar control de marcadores y rendimiento competitivo.</div>"
+        "</div>"
+    )
+    return plantilla_layout(request, board_team, "resultados", body)
+
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2209,25 +2427,72 @@ def save_wildcard(request: Request, name: str = Form("")):
     return RedirectResponse("/?tab=final", status_code=303)
 
 
+
+@app.get("/player/{player_id}", response_class=HTMLResponse)
+def player_detail_page(player_id: int, request: Request):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,''), COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return page("<div class='card'><h2>No encontrada</h2><button type='button' class='btn btn-secondary' onclick='history.back()'>← Volver</button></div>")
+
+    pid, name, team, position, status, notes, photo_url = row
+    photo_src = html.escape(photo_url or player_photo_placeholder(name))
+    return page(
+        f"<div class='card' style='max-width:980px;margin:0 auto;'>"
+        f"<div style='margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;'>"
+        f"<button type='button' onclick='history.back()' class='btn btn-secondary'>← Volver</button>"
+        f"<a class='btn' href='/edit/{pid}'>Editar jugadora</a>"
+        f"</div>"
+        f"<div style='display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);gap:28px;align-items:start;'>"
+        f"<div class='card' style='margin:0;background:#f8fbff;border:1px solid #dbe7ff;'>"
+        f"<div style='border-radius:20px;overflow:hidden;background:#e5e7eb;aspect-ratio:4/5;'>"
+        f"<img src='{photo_src}' alt='{html.escape(name or '')}' style='width:100%;height:100%;object-fit:cover;display:block;'>"
+        f"</div>"
+        f"</div>"
+        f"<div>"
+        f"<h1 style='margin:0 0 12px;font-size:34px;color:#142850;'>{html.escape(name or '')}</h1>"
+        f"<div style='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:18px;'>"
+        f"<div class='card' style='margin:0;'><div class='muted'>Equipo actual</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{html.escape(team or '-')}</div></div>"
+        f"<div class='card' style='margin:0;'><div class='muted'>Posición</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{html.escape(position or '-')}</div></div>"
+        f"<div class='card' style='margin:0;'><div class='muted'>Estado</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>{html.escape(status or '-')}</div></div>"
+        f"<div class='card' style='margin:0;'><div class='muted'>ID interna</div><div style='font-size:20px;font-weight:800;color:#1f2937;'>#{pid}</div></div>"
+        f"</div>"
+        f"<div class='card' style='margin:0;'>"
+        f"<h2 style='margin-top:0;'>Notas</h2>"
+        f"<div style='white-space:pre-wrap;line-height:1.6;color:#374151;'>{html.escape(notes or 'Sin notas registradas.')}</div>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+        f"</div>"
+    )
+
+
 @app.get("/edit/{player_id}", response_class=HTMLResponse)
 def edit_page(player_id: int, request: Request):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,'') FROM players WHERE id=%s", (player_id,))
+    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,''), COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
     if not row:
         return page("<div class='card'><h2>No encontrada</h2><a class='btn' href='/'>Volver</a></div>")
 
-    pid, name, team, position, status, notes = row
+    pid, name, team, position, status, notes, photo_url = row
     status_options = "".join([f"<option value='{s}' {'selected' if s==status else ''}>{s}</option>" for s in ['Disponible', 'Lesionada', 'No disponible']])
 
+    photo_preview = f"<div style='margin:14px 0 8px;'><img src='{html.escape(photo_url)}' style='width:180px;height:220px;object-fit:cover;border-radius:18px;border:1px solid #dbe3f0;box-shadow:0 10px 24px rgba(15,23,42,.10);'></div>" if photo_url else "<div class='muted' style='margin-top:10px;'>Todavía no hay foto subida.</div>"
+
     return page(
-        f"<div style='margin-bottom:20px;'><button type='button' onclick='history.back()' class='btn btn-secondary'>← Volver</button></div>"
-        f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post'>"
+        f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post' enctype='multipart/form-data'>"
         f"<div class='grid'><div><label>Nombre</label><input name='name' value='{html.escape(name or '')}' required></div>"
         f"<div><label>Equipo actual</label><input name='team' value='{html.escape(team or '')}'></div>"
         f"<div><label>Posición</label><select name='position'>"
@@ -2238,22 +2503,52 @@ def edit_page(player_id: int, request: Request):
         f"</select></div>"
         f"<div><label>Estado jugadora</label><select name='status'>{status_options}</select></div></div>"
         f"<div style='margin-top:12px;'><label>Notas</label><textarea name='notes'>{html.escape(notes or '')}</textarea></div>"
+        f"<div class='card' style='margin-top:18px;background:#f8fbff;border:1px solid #dbe7ff;'>"
+        f"<h2 style='margin-top:0;'>Fotografía</h2>"
+        f"<div class='muted'>Sube una imagen JPG, PNG o WEBP. Recomendado: formato vertical o cuadrado.</div>"
+        f"{photo_preview}"
+        f"<label>Nueva foto</label><input type='file' name='photo_file' accept='.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp'>"
+        f"<div style='margin-top:10px;display:flex;align-items:center;gap:8px;'><input id='remove_photo' type='checkbox' name='remove_photo' value='1' style='width:auto;'><label for='remove_photo' style='margin:0;'>Eliminar foto actual</label></div>"
+        f"</div>"
         f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar cambios</button><a class='btn btn-secondary' href='/'>Cancelar</a></div>"
         f"</form></div>"
     )
 
 
 @app.post("/update/{player_id}")
-def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
+def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form(""), remove_photo: str = Form(""), photo_file: UploadFile | None = File(None)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s WHERE id=%s", (name.strip(), team.strip(), position.strip(), status, notes.strip(), player_id))
+    cur.execute("SELECT COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
+    current_row = cur.fetchone()
+    current_photo = current_row[0] if current_row else ""
+    new_photo = current_photo
+
+    if remove_photo == "1":
+        delete_local_photo_if_possible(current_photo)
+        new_photo = ""
+
+    if photo_file and getattr(photo_file, "filename", ""):
+        try:
+            saved_path = save_player_photo_file(photo_file, player_id)
+            if current_photo and current_photo != saved_path:
+                delete_local_photo_if_possible(current_photo)
+            new_photo = saved_path
+        except ValueError as exc:
+            cur.close()
+            conn.close()
+            return page(f"<div class='card'><h2>Error al subir la foto</h2><p>{html.escape(str(exc))}</p><a class='btn' href='/edit/{player_id}'>Volver</a></div>")
+
+    cur.execute(
+        "UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s, photo_url=%s WHERE id=%s",
+        (name.strip(), team.strip(), position.strip(), status, notes.strip(), new_photo, player_id)
+    )
     conn.commit()
     cur.close()
     conn.close()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/edit/{player_id}", status_code=303)
 
 
 @app.post("/delete-player/{player_id}")
