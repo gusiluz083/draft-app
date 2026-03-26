@@ -316,8 +316,26 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 .board-source-list { display:flex; flex-direction:column; gap:8px; max-height:220px; overflow:auto; }
 .board-source-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
 .board-empty { color:#64748b; font-size:14px; }
-@media (max-width:980px) { .board-shell { grid-template-columns:1fr; } }
+.plantilla-module-nav { display:grid; grid-template-columns:repeat(4, minmax(180px, 1fr)); gap:16px; margin-top:18px; }
+.plantilla-module-card { position:relative; display:flex; align-items:center; gap:14px; padding:18px 20px; border-radius:18px; text-decoration:none; color:#0f172a; background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%); border:1px solid #dbe6f5; box-shadow:0 12px 28px rgba(15,23,42,.08); transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease; overflow:hidden; }
+.plantilla-module-card::before { content:''; position:absolute; inset:0 auto 0 0; width:5px; background:linear-gradient(180deg,#1d4ed8 0%,#1e3a8a 100%); opacity:.9; }
+.plantilla-module-card:hover { transform:translateY(-3px); box-shadow:0 18px 34px rgba(15,23,42,.14); border-color:#bfd2ef; background:linear-gradient(180deg,#ffffff 0%,#eff6ff 100%); }
+.plantilla-module-card.active { background:linear-gradient(135deg,#0f172a 0%, #172554 55%, #1e3a8a 100%); color:#ffffff; border-color:transparent; box-shadow:0 20px 42px rgba(15,23,42,.22); }
+.plantilla-module-card.active::before { background:linear-gradient(180deg,#ffffff 0%,#c7d2fe 100%); }
+.plantilla-module-icon { width:52px; height:52px; min-width:52px; border-radius:16px; display:flex; align-items:center; justify-content:center; font-size:26px; background:linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%); box-shadow:inset 0 1px 0 rgba(255,255,255,.7); }
+.plantilla-module-card.active .plantilla-module-icon { background:rgba(255,255,255,.14); color:#ffffff; box-shadow:inset 0 1px 0 rgba(255,255,255,.18); }
+.plantilla-module-copy { display:flex; flex-direction:column; gap:4px; }
+.plantilla-module-title { font-size:18px; font-weight:800; letter-spacing:-0.02em; }
+.plantilla-module-subtitle { font-size:13px; color:#64748b; line-height:1.35; }
+.plantilla-module-card.active .plantilla-module-subtitle { color:#dbeafe; }
+.section-hero { text-align:center; padding:54px 28px; background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%); }
+.section-hero-icon { width:86px; height:86px; margin:0 auto 16px; border-radius:24px; display:flex; align-items:center; justify-content:center; font-size:44px; background:linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%); box-shadow:0 14px 30px rgba(37,99,235,.16); }
+.section-hero h2 { margin:0 0 12px; font-size:34px; letter-spacing:-0.03em; color:#0f172a; }
+.section-hero p { margin:0 auto; max-width:760px; color:#475569; font-size:17px; line-height:1.65; }
+.section-hero .section-note { margin-top:18px; color:#64748b; font-size:14px; }
+@media (max-width:980px) { .board-shell { grid-template-columns:1fr; } .plantilla-module-nav { grid-template-columns:repeat(2, minmax(180px, 1fr)); } }
 @media (max-width:900px) { .grid,.grid-2,.grid-3,.team-cards,.stats { grid-template-columns:1fr; } }
+@media (max-width:640px) { .plantilla-module-nav { grid-template-columns:1fr; } .plantilla-module-card { padding:16px 18px; } .section-hero { padding:40px 20px; } .section-hero h2 { font-size:28px; } }
 </style>
 """
 
@@ -1014,8 +1032,15 @@ def plantilla_section_page(request: Request, section_key: str, section_title: st
 
     nav_html = "".join(
         [
-            f"<a class='btn {'btn-dark' if key == section_key else 'btn-secondary'}' "
-            f"href='/plantilla/{key}' style='text-decoration:none;'>{icon} {label}</a>"
+            f"<a class='plantilla-module-card {'active' if key == section_key else ''}' href='/plantilla/{key}'>"
+            f"<div class='plantilla-module-icon'>{icon}</div>"
+            f"<div class='plantilla-module-copy'>"
+            f"<div class='plantilla-module-title'>{label}</div>"
+            f"<div class='plantilla-module-subtitle'>"
+            f"{'Sección activa del módulo' if key == section_key else 'Entrar en esta área'}"
+            f"</div>"
+            f"</div>"
+            f"</a>"
             for key, label, icon in buttons
         ]
     )
@@ -1031,14 +1056,16 @@ def plantilla_section_page(request: Request, section_key: str, section_title: st
         f"</div>"
         f"</div>"
         f"<div class='card' style='margin-top:18px;'>"
-        f"<h2 style='margin-bottom:14px;'>Áreas del módulo</h2>"
-        f"<div style='display:flex;gap:12px;flex-wrap:wrap;'>{nav_html}</div>"
+        f"<div style='display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:end;'>"
+        f"<div><h2 style='margin:0;'>Áreas del módulo</h2><div class='muted' style='margin-top:6px;'>Accesos directos para trabajar la plantilla de forma ordenada y profesional.</div></div>"
         f"</div>"
-        f"<div class='card' style='margin-top:18px;text-align:center;padding:42px 28px;'>"
-        f"<div style='font-size:58px;line-height:1;margin-bottom:14px;'>{section_icon}</div>"
-        f"<h2 style='margin:0 0 10px;'>{section_title}</h2>"
-        f"<div class='muted' style='max-width:760px;margin:0 auto;font-size:17px;line-height:1.6;'>{section_description}</div>"
-        f"<div class='muted' style='margin-top:16px;'>Página preparada para desarrollarla después, sin tocar lo que ya funciona del resto de la app.</div>"
+        f"<div class='plantilla-module-nav'>{nav_html}</div>"
+        f"</div>"
+        f"<div class='card section-hero' style='margin-top:18px;'>"
+        f"<div class='section-hero-icon'>{section_icon}</div>"
+        f"<h2>{section_title}</h2>"
+        f"<p>{section_description}</p>"
+        f"<div class='section-note'>Página preparada para desarrollarla después, sin tocar lo que ya funciona del resto de la app.</div>"
         f"</div>"
         f"</div>"
     )
