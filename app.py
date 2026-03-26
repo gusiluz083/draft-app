@@ -4,8 +4,7 @@ import io
 import html
 import hashlib
 import json
-import calendar as pycalendar
-from datetime import date, datetime
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
@@ -40,6 +39,7 @@ def get_conn():
         cur.execute("ALTER TABLE team_player_decisions ADD COLUMN IF NOT EXISTS round_order INTEGER")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS team TEXT")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS photo_url TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_board_state (
@@ -61,20 +61,6 @@ def get_conn():
                 current_pick INTEGER,
                 next_pick INTEGER,
                 UNIQUE(board_team)
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS calendar_events (
-                id SERIAL PRIMARY KEY,
-                board_team TEXT NOT NULL,
-                event_date DATE NOT NULL,
-                event_type TEXT NOT NULL DEFAULT 'Otro',
-                title TEXT NOT NULL,
-                event_time TEXT DEFAULT '',
-                notes TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -129,7 +115,8 @@ def init_db():
             team TEXT,
             position TEXT,
             status TEXT DEFAULT 'Disponible',
-            notes TEXT DEFAULT ''
+            notes TEXT DEFAULT '',
+            photo_url TEXT DEFAULT ''
         )
         """
     )
@@ -214,20 +201,6 @@ def init_db():
             video2_url TEXT,
             video3_url TEXT,
             scout_status TEXT DEFAULT 'Seguimiento',
-            notes TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS calendar_events (
-            id SERIAL PRIMARY KEY,
-            board_team TEXT NOT NULL,
-            event_date DATE NOT NULL,
-            event_type TEXT NOT NULL DEFAULT 'Otro',
-            title TEXT NOT NULL,
-            event_time TEXT DEFAULT '',
             notes TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -346,66 +319,8 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 .board-source-list { display:flex; flex-direction:column; gap:8px; max-height:220px; overflow:auto; }
 .board-source-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
 .board-empty { color:#64748b; font-size:14px; }
-.plantilla-module-nav { display:grid; grid-template-columns:repeat(4, minmax(180px, 1fr)); gap:16px; margin-top:18px; }
-.plantilla-module-card { position:relative; display:flex; align-items:center; gap:14px; padding:18px 20px; border-radius:18px; text-decoration:none; color:#0f172a; background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%); border:1px solid #dbe6f5; box-shadow:0 12px 28px rgba(15,23,42,.08); transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease; overflow:hidden; }
-.plantilla-module-card::before { content:''; position:absolute; inset:0 auto 0 0; width:5px; background:linear-gradient(180deg,#1d4ed8 0%,#1e3a8a 100%); opacity:.9; }
-.plantilla-module-card:hover { transform:translateY(-3px); box-shadow:0 18px 34px rgba(15,23,42,.14); border-color:#bfd2ef; background:linear-gradient(180deg,#ffffff 0%,#eff6ff 100%); }
-.plantilla-module-card.active { background:linear-gradient(135deg,#0f172a 0%, #172554 55%, #1e3a8a 100%); color:#ffffff; border-color:transparent; box-shadow:0 20px 42px rgba(15,23,42,.22); }
-.plantilla-module-card.active::before { background:linear-gradient(180deg,#ffffff 0%,#c7d2fe 100%); }
-.plantilla-module-icon { width:52px; height:52px; min-width:52px; border-radius:16px; display:flex; align-items:center; justify-content:center; font-size:26px; background:linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%); box-shadow:inset 0 1px 0 rgba(255,255,255,.7); }
-.plantilla-module-card.active .plantilla-module-icon { background:rgba(255,255,255,.14); color:#ffffff; box-shadow:inset 0 1px 0 rgba(255,255,255,.18); }
-.plantilla-module-copy { display:flex; flex-direction:column; gap:4px; }
-.plantilla-module-title { font-size:18px; font-weight:800; letter-spacing:-0.02em; }
-.plantilla-module-subtitle { font-size:13px; color:#64748b; line-height:1.35; }
-.plantilla-module-card.active .plantilla-module-subtitle { color:#dbeafe; }
-.section-hero { text-align:center; padding:54px 28px; background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%); }
-.section-hero-icon { width:86px; height:86px; margin:0 auto 16px; border-radius:24px; display:flex; align-items:center; justify-content:center; font-size:44px; background:linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%); box-shadow:0 14px 30px rgba(37,99,235,.16); }
-.section-hero h2 { margin:0 0 12px; font-size:34px; letter-spacing:-0.03em; color:#0f172a; }
-.section-hero p { margin:0 auto; max-width:760px; color:#475569; font-size:17px; line-height:1.65; }
-.section-hero .section-note { margin-top:18px; color:#64748b; font-size:14px; }
-@media (max-width:980px) { .board-shell { grid-template-columns:1fr; } .plantilla-module-nav { grid-template-columns:repeat(2, minmax(180px, 1fr)); } }
+@media (max-width:980px) { .board-shell { grid-template-columns:1fr; } }
 @media (max-width:900px) { .grid,.grid-2,.grid-3,.team-cards,.stats { grid-template-columns:1fr; } }
-@media (max-width:640px) { .plantilla-module-nav { grid-template-columns:1fr; } .plantilla-module-card { padding:16px 18px; } .section-hero { padding:40px 20px; } .section-hero h2 { font-size:28px; } }
-
-.calendar-shell { display:grid; grid-template-columns: minmax(0,1.55fr) minmax(320px,0.95fr); gap:18px; align-items:start; }
-.calendar-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
-.calendar-toolbar .month-badge { background:linear-gradient(135deg,#1d4ed8,#2563eb); color:white; padding:12px 18px; border-radius:14px; font-weight:800; font-size:22px; box-shadow:0 12px 24px rgba(37,99,235,0.20); }
-.calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:10px; }
-.calendar-weekday { text-align:center; font-size:12px; font-weight:800; text-transform:uppercase; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; padding:10px 6px; border-radius:12px; letter-spacing:.04em; }
-.calendar-day { min-height:150px; background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%); border:1px solid #dbe6f3; border-radius:18px; padding:12px; display:flex; flex-direction:column; gap:10px; box-shadow:0 8px 20px rgba(15,23,42,0.04); }
-.calendar-day.muted { opacity:.42; background:#f8fafc; }
-.calendar-day.today { border:2px solid #2563eb; box-shadow:0 10px 24px rgba(37,99,235,0.18); }
-.calendar-day-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
-.calendar-day-number { font-size:18px; font-weight:800; color:#0f172a; }
-.calendar-add-link { font-size:12px; color:#2563eb; text-decoration:none; font-weight:700; background:#eff6ff; padding:6px 9px; border-radius:999px; }
-.calendar-events { display:flex; flex-direction:column; gap:8px; }
-.calendar-event { border-radius:12px; padding:9px 10px; font-size:12px; line-height:1.3; color:#0f172a; border:1px solid rgba(15,23,42,0.06); }
-.calendar-event .event-time { font-weight:800; display:block; margin-bottom:3px; }
-.calendar-event .event-title { font-weight:700; display:block; }
-.calendar-event .event-type { display:inline-block; margin-top:5px; font-size:11px; font-weight:700; opacity:.85; }
-.event-partido { background:#fee2e2; }
-.event-entrenamiento { background:#dcfce7; }
-.event-reunión { background:#ede9fe; }
-.event-viaje { background:#fef3c7; }
-.event-médico { background:#cffafe; }
-.event-otro { background:#e2e8f0; }
-.calendar-side-card h3 { margin-bottom:8px; }
-.calendar-side-card .muted { line-height:1.45; }
-.calendar-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.calendar-form-grid .full { grid-column:1 / -1; }
-.mini-list { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
-.mini-event { border:1px solid #e2e8f0; border-radius:14px; padding:12px; background:#fff; }
-.mini-event strong { display:block; margin-bottom:4px; }
-.inline-delete { margin-top:8px; }
-@media (max-width: 1100px) { .calendar-shell { grid-template-columns:1fr; } }
-@media (max-width: 720px) {
-  body { padding:14px; }
-  .calendar-grid { gap:8px; }
-  .calendar-day { min-height:125px; padding:10px; }
-  .calendar-form-grid { grid-template-columns:1fr; }
-  .calendar-toolbar .month-badge { width:100%; text-align:center; }
-}
-
 </style>
 """
 
@@ -676,249 +591,6 @@ def get_team(request: Request):
         return team if team in allowed else (allowed[0] if allowed else None)
     team = request.cookies.get(TEAM_COOKIE, "")
     return team if team in TEAMS else None
-
-
-
-
-CALENDAR_EVENT_TYPES = ["Partido", "Entrenamiento", "Reunión", "Viaje", "Médico", "Otro"]
-WEEKDAY_LABELS = ["L", "M", "X", "J", "V", "S", "D"]
-
-
-def normalize_calendar_month(year: int | None, month: int | None):
-    today = date.today()
-    y = year or today.year
-    m = month or today.month
-    while m < 1:
-        m += 12
-        y -= 1
-    while m > 12:
-        m -= 12
-        y += 1
-    return y, m
-
-
-def previous_month(year: int, month: int):
-    return (year - 1, 12) if month == 1 else (year, month - 1)
-
-
-def next_month(year: int, month: int):
-    return (year + 1, 1) if month == 12 else (year, month + 1)
-
-
-def get_calendar_events_for_month(board_team: str, year: int, month: int):
-    start_date = date(year, month, 1)
-    end_date = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, event_date, event_type, title, COALESCE(event_time, ''), COALESCE(notes, '')
-        FROM calendar_events
-        WHERE board_team = %s AND event_date >= %s AND event_date < %s
-        ORDER BY event_date ASC, NULLIF(event_time, '') ASC, id ASC
-        """,
-        (board_team, start_date, end_date),
-    )
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    grouped = {}
-    for event_id, event_date, event_type, title, event_time, notes in rows:
-        grouped.setdefault(event_date.isoformat(), []).append(
-            {
-                "id": event_id,
-                "date": event_date.isoformat(),
-                "type": event_type or "Otro",
-                "title": title,
-                "time": event_time or "",
-                "notes": notes or "",
-            }
-        )
-    return grouped
-
-
-def create_calendar_event(board_team: str, event_date_str: str, event_type: str, title: str, event_time: str, notes: str):
-    parsed_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
-    clean_type = event_type if event_type in CALENDAR_EVENT_TYPES else "Otro"
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO calendar_events (board_team, event_date, event_type, title, event_time, notes)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (board_team, parsed_date, clean_type, title.strip(), (event_time or "").strip(), (notes or "").strip()),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def delete_calendar_event(board_team: str, event_id: int):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM calendar_events WHERE id = %s AND board_team = %s", (event_id, board_team))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def render_calendar_page(request: Request, board_team: str, year: int | None = None, month: int | None = None, selected_date: str | None = None):
-    year, month = normalize_calendar_month(year, month)
-    calendar_matrix = pycalendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
-    month_events = get_calendar_events_for_month(board_team, year, month)
-    prev_year, prev_month = previous_month(year, month)
-    next_year_value, next_month_value = next_month(year, month)
-    today = date.today()
-    selected_date = selected_date or date(year, month, 1).isoformat()
-    try:
-        datetime.strptime(selected_date, "%Y-%m-%d")
-    except ValueError:
-        selected_date = date(year, month, 1).isoformat()
-
-    event_type_styles = {
-        "Partido": "event-partido",
-        "Entrenamiento": "event-entrenamiento",
-        "Reunión": "event-reunión",
-        "Viaje": "event-viaje",
-        "Médico": "event-médico",
-        "Otro": "event-otro",
-    }
-
-    weekday_html = "".join(f"<div class='calendar-weekday'>{label}</div>" for label in WEEKDAY_LABELS)
-    day_cells = []
-    for week in calendar_matrix:
-        for day_value in week:
-            day_iso = day_value.isoformat()
-            events = month_events.get(day_iso, [])
-            event_html = ""
-            if events:
-                cards = []
-                for event in events[:3]:
-                    style_class = event_type_styles.get(event["type"], "event-otro")
-                    time_html = f"<span class='event-time'>{html.escape(event['time'])}</span>" if event["time"] else ""
-                    cards.append(
-                        f"<div class='calendar-event {style_class}'>"
-                        f"{time_html}"
-                        f"<span class='event-title'>{html.escape(event['title'])}</span>"
-                        f"<span class='event-type'>{html.escape(event['type'])}</span>"
-                        f"</div>"
-                    )
-                if len(events) > 3:
-                    cards.append(f"<div class='muted' style='font-size:12px;font-weight:700;'>+{len(events)-3} más</div>")
-                event_html = "<div class='calendar-events'>" + "".join(cards) + "</div>"
-            else:
-                event_html = "<div class='muted' style='font-size:12px;'>Sin eventos</div>"
-
-            classes = ["calendar-day"]
-            if day_value.month != month:
-                classes.append("muted")
-            if day_value == today:
-                classes.append("today")
-            day_cells.append(
-                f"<div class='{' '.join(classes)}'>"
-                f"<div class='calendar-day-head'>"
-                f"<div class='calendar-day-number'>{day_value.day}</div>"
-                f"<a class='calendar-add-link' href='/plantilla/calendario?year={year}&month={month}&selected_date={day_iso}'>+ Evento</a>"
-                f"</div>"
-                f"{event_html}"
-                f"</div>"
-            )
-
-    selected_events = month_events.get(selected_date, [])
-    type_options = "".join(
-        f"<option value='{html.escape(event_type)}'>{html.escape(event_type)}</option>"
-        for event_type in CALENDAR_EVENT_TYPES
-    )
-    selected_events_html = "".join(
-        [
-            f"<div class='mini-event'>"
-            f"<strong>{html.escape(event['title'])}</strong>"
-            f"<div class='muted'>{html.escape(event['type'])}{' · ' + html.escape(event['time']) if event['time'] else ''}</div>"
-            f"{f'<div style="margin-top:6px;">{html.escape(event["notes"])}</div>' if event['notes'] else ''}"
-            f"<form method='post' action='/plantilla/calendario/delete' class='inline-delete'>"
-            f"<input type='hidden' name='event_id' value='{event['id']}'>"
-            f"<input type='hidden' name='year' value='{year}'>"
-            f"<input type='hidden' name='month' value='{month}'>"
-            f"<button class='btn btn-danger action-btn' type='submit'>Eliminar</button>"
-            f"</form>"
-            f"</div>"
-            for event in selected_events
-        ]
-    ) or "<div class='muted'>No hay eventos en este día todavía.</div>"
-
-    month_label = f"{pycalendar.month_name[month]} {year}"
-    month_label_es = (
-        month_label.replace("January", "Enero").replace("February", "Febrero").replace("March", "Marzo")
-        .replace("April", "Abril").replace("May", "Mayo").replace("June", "Junio").replace("July", "Julio")
-        .replace("August", "Agosto").replace("September", "Septiembre").replace("October", "Octubre")
-        .replace("November", "Noviembre").replace("December", "Diciembre")
-    )
-
-    hero = (
-        f"<div class='card section-hero' style='margin-top:18px;'>"
-        f"<div class='section-hero-icon'>📅</div>"
-        f"<h2>Calendario del equipo</h2>"
-        f"<p>Organiza partidos, entrenamientos, reuniones y cualquier evento importante sin salir de Draft Manager Queens.</p>"
-        f"<div class='section-note'>Calendario interno por equipo, guardado en PostgreSQL y listo para crecer con resultados y estadísticas.</div>"
-        f"</div>"
-    )
-
-    content = (
-        f"<div class='card'>"
-        f"<div class='topbar'>"
-        f"<div><h1>Gestión de Plantilla</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
-        f"<div style='display:flex;gap:10px;flex-wrap:wrap;'>"
-        f"<a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a>"
-        f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
-        f"<a class='btn btn-secondary' href='/logout'>Salir</a>"
-        f"</div>"
-        f"</div>"
-        f"<div class='card' style='margin-top:18px;'>"
-        f"<div style='display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:end;'>"
-        f"<div><h2 style='margin:0;'>Áreas del módulo</h2><div class='muted' style='margin-top:6px;'>Accesos directos para trabajar la plantilla de forma ordenada y profesional.</div></div>"
-        f"</div>"
-        f"<div class='plantilla-module-nav'>"
-        f"<a class='plantilla-module-card' href='/plantilla/plantilla'><div class='plantilla-module-icon'>📋</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Plantilla</div><div class='plantilla-module-subtitle'>Entrar en esta área</div></div></a>"
-        f"<a class='plantilla-module-card' href='/plantilla/estadisticas'><div class='plantilla-module-icon'>📊</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Estadísticas</div><div class='plantilla-module-subtitle'>Entrar en esta área</div></div></a>"
-        f"<a class='plantilla-module-card active' href='/plantilla/calendario'><div class='plantilla-module-icon'>📅</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Calendario</div><div class='plantilla-module-subtitle'>Sección activa del módulo</div></div></a>"
-        f"<a class='plantilla-module-card' href='/plantilla/resultados'><div class='plantilla-module-icon'>🏁</div><div class='plantilla-module-copy'><div class='plantilla-module-title'>Resultados</div><div class='plantilla-module-subtitle'>Entrar en esta área</div></div></a>"
-        f"</div>"
-        f"</div>"
-        f"{hero}"
-        f"<div class='calendar-shell'>"
-        f"<div class='card'>"
-        f"<div class='calendar-toolbar'>"
-        f"<a class='btn btn-secondary' href='/plantilla/calendario?year={prev_year}&month={prev_month}&selected_date={selected_date}'>← Mes anterior</a>"
-        f"<div class='month-badge'>{html.escape(month_label_es)}</div>"
-        f"<a class='btn btn-secondary' href='/plantilla/calendario?year={next_year_value}&month={next_month_value}&selected_date={selected_date}'>Mes siguiente →</a>"
-        f"</div>"
-        f"<div class='calendar-grid'>{weekday_html}{''.join(day_cells)}</div>"
-        f"</div>"
-        f"<div class='card calendar-side-card'>"
-        f"<h3>Añadir evento</h3>"
-        f"<div class='muted'>Guarda partidos, entrenamientos, reuniones y cualquier cita importante del equipo.</div>"
-        f"<form method='post' action='/plantilla/calendario/add' style='margin-top:16px;'>"
-        f"<div class='calendar-form-grid'>"
-        f"<div><label>Fecha</label><input type='date' name='event_date' value='{html.escape(selected_date)}' required></div>"
-        f"<div><label>Tipo</label><select name='event_type'>{type_options}</select></div>"
-        f"<div class='full'><label>Título</label><input type='text' name='title' placeholder='Ej. Partido vs Jijantas' required></div>"
-        f"<div><label>Hora</label><input type='time' name='event_time'></div>"
-        f"<div class='full'><label>Notas</label><textarea name='notes' placeholder='Detalles del evento, ubicación, rival, convocatoria...'></textarea></div>"
-        f"<input type='hidden' name='year' value='{year}'>"
-        f"<input type='hidden' name='month' value='{month}'>"
-        f"<button class='btn btn-success full' type='submit'>Guardar evento</button>"
-        f"</div>"
-        f"</form>"
-        f"<div class='mini-list'>"
-        f"<h3 style='margin:6px 0 0;'>Eventos del {html.escape(selected_date)}</h3>"
-        f"{selected_events_html}"
-        f"</div>"
-        f"</div>"
-        f"</div>"
-        f"</div>"
-    )
-    return page(content)
 
 
 def get_team_board_state(board_team: str):
@@ -1321,65 +993,131 @@ def select_module_page(request: Request):
     return page(content)
 
 
-def plantilla_module_guard(request: Request):
-    user = require_user(request)
-    if not user:
-        return None, None, RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return None, None, RedirectResponse("/select-team", status_code=303)
-    return user, board_team, None
 
-
-def plantilla_section_page(request: Request, section_key: str, section_title: str, section_icon: str, section_description: str):
-    user, board_team, redirect = plantilla_module_guard(request)
-    if redirect:
-        return redirect
-
-    buttons = [
-        ("plantilla", "Plantilla", "📋"),
-        ("estadisticas", "Estadísticas", "📊"),
-        ("calendario", "Calendario", "📅"),
-        ("resultados", "Resultados", "🏁"),
+def plantilla_module_nav(active: str) -> str:
+    items = [
+        ("plantilla", "Plantilla", "/plantilla"),
+        ("estadisticas", "Estadísticas", "/plantilla/estadisticas"),
+        ("calendario", "Calendario", "/plantilla/calendario"),
+        ("resultados", "Resultados", "/plantilla/resultados"),
     ]
+    links = []
+    for key, label, href in items:
+        cls = "module-tab active" if key == active else "module-tab"
+        links.append(f"<a class='{cls}' href='{href}'>{html.escape(label)}</a>")
+    return "<div class='module-tabs'>" + "".join(links) + "</div>"
 
-    nav_html = "".join(
-        [
-            f"<a class='plantilla-module-card {'active' if key == section_key else ''}' href='/plantilla/{key}'>"
-            f"<div class='plantilla-module-icon'>{icon}</div>"
-            f"<div class='plantilla-module-copy'>"
-            f"<div class='plantilla-module-title'>{label}</div>"
-            f"<div class='plantilla-module-subtitle'>"
-            f"{'Sección activa del módulo' if key == section_key else 'Entrar en esta área'}"
-            f"</div>"
-            f"</div>"
-            f"</a>"
-            for key, label, icon in buttons
-        ]
+
+def player_photo_placeholder(name: str) -> str:
+    safe_name = (name or "").strip() or "Jugadora"
+    initial = safe_name[:1].upper()
+    svg = f"""
+    <svg xmlns='http://www.w3.org/2000/svg' width='600' height='760' viewBox='0 0 600 760'>
+      <defs>
+        <linearGradient id='bg' x1='0' x2='1' y1='0' y2='1'>
+          <stop offset='0%' stop-color='#223b7b'/>
+          <stop offset='100%' stop-color='#0f172a'/>
+        </linearGradient>
+      </defs>
+      <rect width='600' height='760' fill='url(#bg)'/>
+      <circle cx='300' cy='275' r='110' fill='rgba(255,255,255,0.18)'/>
+      <path d='M160 620c22-108 102-167 140-167s118 59 140 167' fill='rgba(255,255,255,0.18)'/>
+      <text x='50%' y='92%' dominant-baseline='middle' text-anchor='middle'
+            font-family='Arial, sans-serif' font-size='86' font-weight='700' fill='rgba(255,255,255,0.92)'>{html.escape(initial)}</text>
+    </svg>
+    """
+    return "data:image/svg+xml;charset=utf-8," + quote(svg)
+
+
+def get_plantilla_players(board_team: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT p.id, p.name, COALESCE(p.position, ''), COALESCE(p.photo_url, '')
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team = %s AND d.status = 'Elegida'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        LIMIT 12
+        """,
+        (board_team,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    players = [{"id": r[0], "name": r[1], "position": r[2], "photo_url": r[3]} for r in rows]
+    while len(players) < 12:
+        players.append({"id": None, "name": "Hueco disponible", "position": "", "photo_url": ""})
+    return players
+
+
+def render_plantilla_gallery(board_team: str) -> str:
+    cards = []
+    for player in get_plantilla_players(board_team):
+        has_player = bool(player["id"])
+        photo = (player["photo_url"] or "").strip() if has_player else ""
+        img_src = html.escape(photo or player_photo_placeholder(player["name"]))
+        name = html.escape(player["name"])
+        subtitle = html.escape(player["position"] or ("Pendiente" if has_player else "Completa tu plantilla"))
+        extra_class = "" if has_player else " empty"
+        badge = "<span class='player-badge'>Plantilla</span>" if has_player else "<span class='player-badge muted-badge'>Libre</span>"
+        cards.append(
+            f"<article class='player-card{extra_class}'>"
+            f"{badge}"
+            f"<div class='player-photo-wrap'><img class='player-photo' src='{img_src}' alt='{name}'></div>"
+            f"<div class='player-info'><div class='player-name'>{name}</div><div class='player-subtitle'>{subtitle}</div></div>"
+            f"</article>"
+        )
+    return (
+        "<div class='gallery-header'>"
+        f"<div><h2 style='margin:0;'>Plantilla visual</h2><div class='muted'>Vista principal de 12 jugadoras para <strong>{html.escape(board_team)}</strong>.</div></div>"
+        f"<div class='gallery-count'>12 plazas</div>"
+        "</div>"
+        "<div class='players-grid'>" + "".join(cards) + "</div>"
     )
 
+
+def plantilla_layout(request: Request, board_team: str, active: str, body: str) -> str:
+    module_styles = """
+    <style>
+    .module-shell{padding:28px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);}
+    .module-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:22px;}
+    .module-hero h1{margin:0;font-size:34px;color:#142850;}
+    .module-actions{display:flex;gap:10px;flex-wrap:wrap;}
+    .module-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0 24px;}
+    .module-tab{display:flex;align-items:center;justify-content:center;padding:18px 14px;border-radius:18px;text-decoration:none;font-weight:800;font-size:18px;color:#1f3b73;background:linear-gradient(180deg,#eef4ff 0%,#e1ebff 100%);border:1px solid #d5e2ff;box-shadow:0 10px 24px rgba(31,59,115,0.08);transition:all .2s ease;}
+    .module-tab:hover{transform:translateY(-2px);box-shadow:0 14px 28px rgba(31,59,115,0.14);}
+    .module-tab.active{background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;border-color:#1b2f63;box-shadow:0 16px 32px rgba(27,47,99,0.28);}
+    .gallery-header{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+    .gallery-count{padding:10px 16px;border-radius:999px;background:#fff3e8;color:#b45309;font-weight:800;border:1px solid #fed7aa;}
+    .players-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px;}
+    .player-card{position:relative;overflow:hidden;border-radius:24px;background:#fff;border:1px solid #e5e7eb;box-shadow:0 14px 32px rgba(15,23,42,0.08);transition:transform .18s ease,box-shadow .18s ease;}
+    .player-card:hover{transform:translateY(-4px);box-shadow:0 22px 42px rgba(15,23,42,0.14);}
+    .player-card.empty{background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%);}
+    .player-photo-wrap{aspect-ratio:4/5;background:#e5e7eb;overflow:hidden;}
+    .player-photo{width:100%;height:100%;object-fit:cover;display:block;}
+    .player-info{padding:18px 18px 20px;}
+    .player-name{font-size:24px;font-weight:800;line-height:1.1;color:#1f2937;margin-bottom:6px;}
+    .player-subtitle{font-size:14px;color:#6b7280;font-weight:700;}
+    .player-badge{position:absolute;top:14px;left:14px;padding:8px 12px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:12px;font-weight:800;z-index:2;box-shadow:0 6px 14px rgba(194,65,12,0.14);}
+    .muted-badge{background:#e5e7eb;color:#4b5563;box-shadow:none;}
+    .module-placeholder{padding:34px;border-radius:22px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid #e5e7eb;box-shadow:0 10px 30px rgba(15,23,42,0.06);}
+    .module-placeholder h2{margin-top:0;color:#142850;}
+    @media (max-width: 1200px){.players-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
+    @media (max-width: 900px){.module-tabs{grid-template-columns:repeat(2,minmax(0,1fr));}.players-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+    @media (max-width: 640px){.module-shell{padding:20px;}.module-tab{font-size:16px;padding:16px 12px;}.players-grid{grid-template-columns:1fr;}.player-name{font-size:22px;}}
+    </style>
+    """
     content = (
-        f"<div class='card'>"
-        f"<div class='topbar'>"
+        module_styles +
+        f"<div class='card module-shell'>"
+        f"<div class='module-hero'>"
         f"<div><h1>Gestión de Plantilla</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
-        f"<div style='display:flex;gap:10px;flex-wrap:wrap;'>"
-        f"<a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a>"
-        f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
-        f"<a class='btn btn-secondary' href='/logout'>Salir</a>"
+        f"<div class='module-actions'><a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
         f"</div>"
-        f"</div>"
-        f"<div class='card' style='margin-top:18px;'>"
-        f"<div style='display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:end;'>"
-        f"<div><h2 style='margin:0;'>Áreas del módulo</h2><div class='muted' style='margin-top:6px;'>Accesos directos para trabajar la plantilla de forma ordenada y profesional.</div></div>"
-        f"</div>"
-        f"<div class='plantilla-module-nav'>{nav_html}</div>"
-        f"</div>"
-        f"<div class='card section-hero' style='margin-top:18px;'>"
-        f"<div class='section-hero-icon'>{section_icon}</div>"
-        f"<h2>{section_title}</h2>"
-        f"<p>{section_description}</p>"
-        f"<div class='section-note'>Página preparada para desarrollarla después, sin tocar lo que ya funciona del resto de la app.</div>"
-        f"</div>"
+        f"{plantilla_module_nav(active)}"
+        f"{body}"
         f"</div>"
     )
     return page(content)
@@ -1387,94 +1125,65 @@ def plantilla_section_page(request: Request, section_key: str, section_title: st
 
 @app.get("/plantilla", response_class=HTMLResponse)
 def plantilla_home(request: Request):
-    return RedirectResponse("/plantilla/plantilla", status_code=303)
-
-
-@app.get("/plantilla/plantilla", response_class=HTMLResponse)
-def plantilla_section_plantilla(request: Request):
-    return plantilla_section_page(
-        request,
-        "plantilla",
-        "Plantilla",
-        "📋",
-        "Aquí construiremos la gestión completa de la plantilla del equipo: jugadoras, estructura, fichas y control deportivo.",
-    )
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    return plantilla_layout(request, board_team, "plantilla", render_plantilla_gallery(board_team))
 
 
 @app.get("/plantilla/estadisticas", response_class=HTMLResponse)
-def plantilla_section_estadisticas(request: Request):
-    return plantilla_section_page(
-        request,
-        "estadisticas",
-        "Estadísticas",
-        "📊",
-        "Aquí desarrollaremos el panel de estadísticas del equipo, con métricas, análisis y seguimiento de rendimiento.",
+def plantilla_estadisticas(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    body = (
+        "<div class='module-placeholder'>"
+        "<h2>Estadísticas</h2>"
+        "<div class='muted'>Espacio preparado para métricas deportivas, medias y evolución del equipo.</div>"
+        "</div>"
     )
+    return plantilla_layout(request, board_team, "estadisticas", body)
 
 
 @app.get("/plantilla/calendario", response_class=HTMLResponse)
-def plantilla_section_calendario(request: Request, year: int | None = None, month: int | None = None, selected_date: str | None = None):
+def plantilla_calendario(request: Request):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    return render_calendar_page(request, board_team, year, month, selected_date)
-
-
-@app.post("/plantilla/calendario/add")
-def plantilla_calendar_add(
-    request: Request,
-    event_date: str = Form(...),
-    event_type: str = Form("Otro"),
-    title: str = Form(...),
-    event_time: str = Form(""),
-    notes: str = Form(""),
-    year: int = Form(...),
-    month: int = Form(...),
-):
-    user = require_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-
-    if title.strip():
-        create_calendar_event(board_team, event_date, event_type, title, event_time, notes)
-
-    return RedirectResponse(f"/plantilla/calendario?year={year}&month={month}&selected_date={event_date}", status_code=303)
-
-
-@app.post("/plantilla/calendario/delete")
-def plantilla_calendar_delete(
-    request: Request,
-    event_id: int = Form(...),
-    year: int = Form(...),
-    month: int = Form(...),
-):
-    user = require_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-
-    delete_calendar_event(board_team, event_id)
-    return RedirectResponse(f"/plantilla/calendario?year={year}&month={month}", status_code=303)
-
+    body = (
+        "<div class='module-placeholder'>"
+        "<h2>Calendario</h2>"
+        "<div class='muted'>Página preparada para integrar partidos, entrenamientos y eventos del equipo.</div>"
+        "</div>"
+    )
+    return plantilla_layout(request, board_team, "calendario", body)
 
 
 @app.get("/plantilla/resultados", response_class=HTMLResponse)
-def plantilla_section_resultados(request: Request):
-    return plantilla_section_page(
-        request,
-        "resultados",
-        "Resultados",
-        "🏁",
-        "Aquí montaremos la página de resultados para llevar el control de partidos, marcadores y evolución competitiva.",
+def plantilla_resultados(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    body = (
+        "<div class='module-placeholder'>"
+        "<h2>Resultados</h2>"
+        "<div class='muted'>Página preparada para llevar control de marcadores y rendimiento competitivo.</div>"
+        "</div>"
     )
+    return plantilla_layout(request, board_team, "resultados", body)
+
 
 
 @app.get("/", response_class=HTMLResponse)
