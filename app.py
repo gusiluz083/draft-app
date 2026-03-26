@@ -887,8 +887,8 @@ def login_page(request: Request, error: str = ""):
         "<form action='/login' method='post'>"
         "<div style='margin:12px 0;'><label>Usuario</label><input name='username' required></div>"
         "<div style='margin:12px 0;'><label>Contraseña</label><input type='password' name='password' required></div>"
-        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Draft Manager Kings&Queens League
-© Josep Maria Bofill – Todos los derechos reservados
+        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Draft Manager Kings&Queens League<br>
+© Josep Maria Bofill – Todos los derechos reservados<br>
 Queda prohibida su reproducción o explotación comercial sin autorización expresa del autor..<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
     )
 
