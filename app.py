@@ -8,10 +8,18 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 import psycopg2
+import uuid
 
 app = FastAPI()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 SECRET_KEY = os.getenv("SECRET_KEY", "cambia-esto-en-render")
@@ -1062,21 +1070,49 @@ def render_plantilla_gallery(board_team: str) -> str:
         subtitle = html.escape(player["position"] or ("Pendiente" if has_player else "Completa tu plantilla"))
         extra_class = "" if has_player else " empty"
         badge = "<span class='player-badge'>Plantilla</span>" if has_player else "<span class='player-badge muted-badge'>Libre</span>"
+        action_html = f"<div class='player-card-actions'><a class='mini-btn' href='/edit/{player['id']}'>Subir foto</a></div>" if has_player else ""
         cards.append(
             f"<article class='player-card{extra_class}'>"
             f"{badge}"
             f"<div class='player-photo-wrap'><img class='player-photo' src='{img_src}' alt='{name}'></div>"
-            f"<div class='player-info'><div class='player-name'>{name}</div><div class='player-subtitle'>{subtitle}</div></div>"
+            f"<div class='player-info'><div class='player-name'>{name}</div><div class='player-subtitle'>{subtitle}</div>{action_html}</div>"
             f"</article>"
         )
     return (
         "<div class='gallery-header'>"
-        f"<div><h2 style='margin:0;'>Plantilla visual</h2><div class='muted'>Vista principal de 12 jugadoras para <strong>{html.escape(board_team)}</strong>.</div></div>"
+        f"<div><h2 style='margin:0;'>Plantilla visual</h2><div class='muted'>Vista principal de 12 jugadoras para <strong>{html.escape(board_team)}</strong>. Pulsa <strong>Subir foto</strong> en cualquier tarjeta para cargar la imagen.</div></div>"
         f"<div class='gallery-count'>12 plazas</div>"
         "</div>"
         "<div class='players-grid'>" + "".join(cards) + "</div>"
     )
 
+
+
+
+def save_player_photo_file(upload: UploadFile, player_id: int) -> str:
+    original_name = (upload.filename or "").strip()
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise ValueError("Formato no permitido. Usa JPG, PNG o WEBP.")
+    token = uuid.uuid4().hex
+    filename = f"player_{player_id}_{token}{ext}"
+    absolute_path = os.path.join(UPLOADS_DIR, filename)
+    content = upload.file.read()
+    with open(absolute_path, "wb") as f:
+        f.write(content)
+    return f"/static/uploads/{filename}"
+
+
+def delete_local_photo_if_possible(photo_url: str) -> None:
+    photo_url = (photo_url or "").strip()
+    if not photo_url.startswith("/static/uploads/"):
+        return
+    absolute_path = os.path.join(BASE_DIR, photo_url.lstrip("/"))
+    try:
+        if os.path.exists(absolute_path):
+            os.remove(absolute_path)
+    except Exception:
+        pass
 
 def plantilla_layout(request: Request, board_team: str, active: str, body: str) -> str:
     module_styles = """
@@ -1100,6 +1136,9 @@ def plantilla_layout(request: Request, board_team: str, active: str, body: str) 
     .player-info{padding:18px 18px 20px;}
     .player-name{font-size:24px;font-weight:800;line-height:1.1;color:#1f2937;margin-bottom:6px;}
     .player-subtitle{font-size:14px;color:#6b7280;font-weight:700;}
+    .player-card-actions{margin-top:14px;display:flex;justify-content:center;}
+    .mini-btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:999px;background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;text-decoration:none;font-weight:800;font-size:13px;box-shadow:0 8px 18px rgba(27,47,99,0.22);}
+    .mini-btn:hover{opacity:.95;transform:translateY(-1px);}
     .player-badge{position:absolute;top:14px;left:14px;padding:8px 12px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:12px;font-weight:800;z-index:2;box-shadow:0 6px 14px rgba(194,65,12,0.14);}
     .muted-badge{background:#e5e7eb;color:#4b5563;box-shadow:none;}
     .module-placeholder{padding:34px;border-radius:22px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid #e5e7eb;box-shadow:0 10px 30px rgba(15,23,42,0.06);}
@@ -2387,18 +2426,20 @@ def edit_page(player_id: int, request: Request):
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,'') FROM players WHERE id=%s", (player_id,))
+    cur.execute("SELECT id, name, team, position, status, COALESCE(notes,''), COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
     if not row:
         return page("<div class='card'><h2>No encontrada</h2><a class='btn' href='/'>Volver</a></div>")
 
-    pid, name, team, position, status, notes = row
+    pid, name, team, position, status, notes, photo_url = row
     status_options = "".join([f"<option value='{s}' {'selected' if s==status else ''}>{s}</option>" for s in ['Disponible', 'Lesionada', 'No disponible']])
 
+    photo_preview = f"<div style='margin:14px 0 8px;'><img src='{html.escape(photo_url)}' style='width:180px;height:220px;object-fit:cover;border-radius:18px;border:1px solid #dbe3f0;box-shadow:0 10px 24px rgba(15,23,42,.10);'></div>" if photo_url else "<div class='muted' style='margin-top:10px;'>Todavía no hay foto subida.</div>"
+
     return page(
-        f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post'>"
+        f"<div class='card'><h1>Editar jugadora</h1><form action='/update/{pid}' method='post' enctype='multipart/form-data'>"
         f"<div class='grid'><div><label>Nombre</label><input name='name' value='{html.escape(name or '')}' required></div>"
         f"<div><label>Equipo actual</label><input name='team' value='{html.escape(team or '')}'></div>"
         f"<div><label>Posición</label><select name='position'>"
@@ -2409,22 +2450,52 @@ def edit_page(player_id: int, request: Request):
         f"</select></div>"
         f"<div><label>Estado jugadora</label><select name='status'>{status_options}</select></div></div>"
         f"<div style='margin-top:12px;'><label>Notas</label><textarea name='notes'>{html.escape(notes or '')}</textarea></div>"
+        f"<div class='card' style='margin-top:18px;background:#f8fbff;border:1px solid #dbe7ff;'>"
+        f"<h2 style='margin-top:0;'>Fotografía</h2>"
+        f"<div class='muted'>Sube una imagen JPG, PNG o WEBP. Recomendado: formato vertical o cuadrado.</div>"
+        f"{photo_preview}"
+        f"<label>Nueva foto</label><input type='file' name='photo_file' accept='.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp'>"
+        f"<div style='margin-top:10px;display:flex;align-items:center;gap:8px;'><input id='remove_photo' type='checkbox' name='remove_photo' value='1' style='width:auto;'><label for='remove_photo' style='margin:0;'>Eliminar foto actual</label></div>"
+        f"</div>"
         f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar cambios</button><a class='btn btn-secondary' href='/'>Cancelar</a></div>"
         f"</form></div>"
     )
 
 
 @app.post("/update/{player_id}")
-def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
+def update_player(player_id: int, request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form(""), remove_photo: str = Form(""), photo_file: UploadFile | None = File(None)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s WHERE id=%s", (name.strip(), team.strip(), position.strip(), status, notes.strip(), player_id))
+    cur.execute("SELECT COALESCE(photo_url, '') FROM players WHERE id=%s", (player_id,))
+    current_row = cur.fetchone()
+    current_photo = current_row[0] if current_row else ""
+    new_photo = current_photo
+
+    if remove_photo == "1":
+        delete_local_photo_if_possible(current_photo)
+        new_photo = ""
+
+    if photo_file and getattr(photo_file, "filename", ""):
+        try:
+            saved_path = save_player_photo_file(photo_file, player_id)
+            if current_photo and current_photo != saved_path:
+                delete_local_photo_if_possible(current_photo)
+            new_photo = saved_path
+        except ValueError as exc:
+            cur.close()
+            conn.close()
+            return page(f"<div class='card'><h2>Error al subir la foto</h2><p>{html.escape(str(exc))}</p><a class='btn' href='/edit/{player_id}'>Volver</a></div>")
+
+    cur.execute(
+        "UPDATE players SET name=%s, team=%s, position=%s, status=%s, notes=%s, photo_url=%s WHERE id=%s",
+        (name.strip(), team.strip(), position.strip(), status, notes.strip(), new_photo, player_id)
+    )
     conn.commit()
     cur.close()
     conn.close()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/edit/{player_id}", status_code=303)
 
 
 @app.post("/delete-player/{player_id}")
