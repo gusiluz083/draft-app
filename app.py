@@ -750,6 +750,434 @@ def get_team_counts(board_team: str):
     }
 
 
+
+def render_plantilla_estadisticas(board_team: str) -> str:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            COALESCE(p.position, ''),
+            p.age,
+            p.rating,
+            COALESCE(p.squad_role, ''),
+            COALESCE(p.physical_status, ''),
+            COALESCE(p.season_matches, 0),
+            COALESCE(p.season_goals, 0),
+            COALESCE(p.season_assists, 0),
+            COALESCE(p.season_minutes, 0)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s AND d.status='Elegida'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        """,
+        (board_team,),
+    )
+    final_rows = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT
+            p.id,
+            p.name,
+            COALESCE(p.position, ''),
+            COALESCE(d.draft_round, 999),
+            COALESCE(d.round_order, 999),
+            COALESCE(p.rating, 0)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s AND d.status='Objetivo'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        LIMIT 5
+        """,
+        (board_team,),
+    )
+    objective_rows = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT
+            COALESCE(position, ''),
+            COALESCE(scout_status, 'Seguimiento'),
+            COALESCE(priority_level, ''),
+            COALESCE(estimated_level, '')
+        FROM new_players
+        """
+    )
+    scouting_rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    final_total = len(final_rows)
+    open_slots = max(0, 12 - final_total)
+    wildcard_name = (get_wildcard(board_team) or "").strip()
+    wildcard_status = "Asignada" if wildcard_name else "Pendiente"
+
+    positions = {"Portera": 0, "Defensa": 0, "Medio": 0, "Delantera": 0}
+    role_counts = {"Titular": 0, "Rotación": 0, "Desarrollo": 0}
+    physical_counts = {}
+    ages, ratings = [], []
+    matches = goals = assists = minutes = 0
+
+    for position, age, rating, squad_role, physical_status, season_matches, season_goals, season_assists, season_minutes in final_rows:
+        pos = (position or "").strip()
+        if pos in positions:
+            positions[pos] += 1
+        if age is not None:
+            try:
+                ages.append(float(age))
+            except Exception:
+                pass
+        if rating is not None:
+            try:
+                ratings.append(float(rating))
+            except Exception:
+                pass
+        matches += int(season_matches or 0)
+        goals += int(season_goals or 0)
+        assists += int(season_assists or 0)
+        minutes += int(season_minutes or 0)
+
+        normalized_role = (squad_role or "").strip().lower()
+        if "tit" in normalized_role:
+            role_counts["Titular"] += 1
+        elif "rota" in normalized_role:
+            role_counts["Rotación"] += 1
+        elif normalized_role:
+            role_counts["Desarrollo"] += 1
+
+        normalized_physical = (physical_status or "").strip() or "Sin dato"
+        physical_counts[normalized_physical] = physical_counts.get(normalized_physical, 0) + 1
+
+    age_avg = round(sum(ages) / len(ages), 1) if ages else None
+    rating_avg = round(sum(ratings) / len(ratings), 1) if ratings else None
+
+    scouting_total = len(scouting_rows)
+    scouting_status_counts = {"Top": 0, "Interesante": 0, "Seguimiento": 0, "Descartada": 0}
+    scouting_priority_high = 0
+    scouting_positions = {"Portera": 0, "Defensa": 0, "Medio": 0, "Delantera": 0}
+
+    for position, scout_status, priority_level, estimated_level in scouting_rows:
+        status_norm = (scout_status or "").strip().lower()
+        if "top" in status_norm:
+            scouting_status_counts["Top"] += 1
+        elif "inter" in status_norm:
+            scouting_status_counts["Interesante"] += 1
+        elif "desc" in status_norm:
+            scouting_status_counts["Descartada"] += 1
+        else:
+            scouting_status_counts["Seguimiento"] += 1
+
+        priority_norm = f"{priority_level or ''} {estimated_level or ''}".lower()
+        if any(token in priority_norm for token in ["alta", "high", "top", "prior"]):
+            scouting_priority_high += 1
+
+        pos = (position or "").strip()
+        if pos in scouting_positions:
+            scouting_positions[pos] += 1
+
+    target_counts = {"Portera": 2, "Defensa": 4, "Medio": 4, "Delantera": 2}
+
+    def fmt_number(value):
+        return f"{value:.1f}".replace(".", ",")
+
+    def progress_pct(current, total):
+        if total <= 0:
+            return 0
+        return max(0, min(100, int(round((current / total) * 100))))
+
+    def line_status(position_key):
+        current = positions.get(position_key, 0)
+        target = target_counts.get(position_key, 0)
+        if current == 0:
+            return "Crítica", "danger"
+        if current < target:
+            return "Pendiente", "warn"
+        if current == target:
+            return "Correcta", "ok"
+        return "Exceso", "info"
+
+    alerts = []
+    if open_slots > 0:
+        alerts.append(f"Faltan {open_slots} plazas para cerrar la plantilla.")
+    else:
+        alerts.append("Plantilla completa de 12 jugadoras.")
+    if positions["Portera"] < target_counts["Portera"]:
+        alerts.append("La portería está incompleta.")
+    if positions["Delantera"] < target_counts["Delantera"]:
+        alerts.append("Falta profundidad ofensiva.")
+    if positions["Medio"] > target_counts["Medio"]:
+        alerts.append("Hay exceso de perfiles de medio.")
+    if scouting_priority_high > 0:
+        alerts.append(f"Hay {scouting_priority_high} perfiles de scouting en prioridad alta.")
+    if wildcard_name:
+        alerts.append(f"Wildcard asignada a {wildcard_name}.")
+    if not objective_rows:
+        alerts.append("No hay objetivos activos en preselección.")
+
+    cards = [
+        ("Plantilla", f"{final_total}/12", "Plazas ocupadas", progress_pct(final_total, 12)),
+        ("Porteras", f"{positions['Portera']}/2", "Cobertura de portería", progress_pct(positions["Portera"], 2)),
+        ("Edad media", fmt_number(age_avg) if age_avg is not None else "—", "Promedio de plantilla", None),
+        ("Nivel medio", fmt_number(rating_avg) if rating_avg is not None else "—", "Rating medio actual", None),
+        ("Scouting", str(scouting_total), "Jugadoras nuevas registradas", None),
+        ("Objetivos", str(len(objective_rows)), "Prioridades activas", None),
+    ]
+
+    stat_cards_html = []
+    for title, value, caption, pct in cards:
+        meter = ""
+        if pct is not None:
+            meter = (
+                f"<div class='stats-pro-meter'><span style='width:{pct}%;'></span></div>"
+                f"<div class='stats-pro-caption'>{caption}</div>"
+            )
+        else:
+            meter = f"<div class='stats-pro-caption'>{html.escape(caption)}</div>"
+        stat_cards_html.append(
+            "<div class='stats-pro-kpi'>"
+            f"<div class='stats-pro-kpi-title'>{html.escape(title)}</div>"
+            f"<div class='stats-pro-kpi-value'>{html.escape(str(value))}</div>"
+            f"{meter}"
+            "</div>"
+        )
+
+    composition_items = []
+    max_target = max(target_counts.values()) or 1
+    for label in ["Portera", "Defensa", "Medio", "Delantera"]:
+        current = positions[label]
+        target = target_counts[label]
+        pct = progress_pct(current, max_target)
+        composition_items.append(
+            "<div class='stats-pro-line'>"
+            f"<div class='stats-pro-line-head'><span>{html.escape(label)}</span><strong>{current}/{target}</strong></div>"
+            f"<div class='stats-pro-line-track'><span style='width:{pct}%;'></span></div>"
+            "</div>"
+        )
+
+    status_items = []
+    for label in ["Portera", "Defensa", "Medio", "Delantera"]:
+        status_text, tone = line_status(label)
+        status_items.append(
+            "<div class='stats-pro-status-item'>"
+            f"<div><div class='stats-pro-status-title'>{html.escape(label)}</div>"
+            f"<div class='stats-pro-status-sub'>{positions[label]}/{target_counts[label]} jugadoras</div></div>"
+            f"<span class='stats-pro-pill {tone}'>{html.escape(status_text)}</span>"
+            "</div>"
+        )
+
+    role_items = []
+    for label, count in role_counts.items():
+        role_items.append(
+            "<div class='stats-pro-mini'>"
+            f"<div class='stats-pro-mini-label'>{html.escape(label)}</div>"
+            f"<div class='stats-pro-mini-value'>{count}</div>"
+            "</div>"
+        )
+
+    metrics_items = [
+        ("Partidos", matches),
+        ("Goles", goals),
+        ("Asistencias", assists),
+        ("Minutos", minutes),
+    ]
+    metric_boxes = []
+    for label, value in metrics_items:
+        metric_boxes.append(
+            "<div class='stats-pro-mini'>"
+            f"<div class='stats-pro-mini-label'>{html.escape(label)}</div>"
+            f"<div class='stats-pro-mini-value'>{html.escape(str(value))}</div>"
+            "</div>"
+        )
+
+    scouting_funnel = []
+    for label in ["Top", "Interesante", "Seguimiento", "Descartada"]:
+        value = scouting_status_counts[label]
+        pct = progress_pct(value, scouting_total or 1)
+        scouting_funnel.append(
+            "<div class='stats-pro-line'>"
+            f"<div class='stats-pro-line-head'><span>{html.escape(label)}</span><strong>{value}</strong></div>"
+            f"<div class='stats-pro-line-track scouting'><span style='width:{pct}%;'></span></div>"
+            "</div>"
+        )
+
+    objective_table_rows = []
+    if objective_rows:
+        for _player_id, name, position, draft_round, round_order, rating in objective_rows:
+            round_text = "—" if draft_round in (None, 999) else f"R{int(draft_round)}"
+            order_text = "" if round_order in (None, 999) else f" · #{int(round_order)}"
+            rating_text = "—" if not rating else str(int(rating))
+            objective_table_rows.append(
+                "<tr>"
+                f"<td>{html.escape(name or '')}</td>"
+                f"<td>{html.escape(position or '—')}</td>"
+                f"<td>{html.escape(round_text + order_text)}</td>"
+                f"<td>{html.escape(rating_text)}</td>"
+                "</tr>"
+            )
+    else:
+        objective_table_rows.append("<tr><td colspan='4' class='stats-pro-empty'>No hay objetivos activos.</td></tr>")
+
+    alert_items = "".join(f"<li>{html.escape(msg)}</li>" for msg in alerts[:5])
+
+    physical_badges = []
+    for label, count in sorted(physical_counts.items(), key=lambda item: (-item[1], item[0])):
+        physical_badges.append(f"<span class='stats-pro-chip'>{html.escape(label)} · {count}</span>")
+    if not physical_badges:
+        physical_badges.append("<span class='stats-pro-chip'>Sin datos físicos todavía</span>")
+
+    wildcard_html = (
+        f"<span class='stats-pro-chip accent'>Wildcard · {html.escape(wildcard_name)}</span>"
+        if wildcard_name else
+        "<span class='stats-pro-chip'>Wildcard pendiente</span>"
+    )
+
+    dashboard = f"""
+    <style>
+    .stats-pro-shell{{display:grid;gap:18px;}}
+    .stats-pro-hero{{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;padding:26px;border-radius:28px;background:linear-gradient(135deg,#132a57 0%,#1f4f9a 100%);color:#fff;box-shadow:0 18px 45px rgba(15,23,42,.16);}}
+    .stats-pro-hero h2{{margin:0 0 8px;font-size:32px;color:#fff;}}
+    .stats-pro-hero p{{margin:0;color:rgba(255,255,255,.82);max-width:760px;line-height:1.6;font-size:15px;}}
+    .stats-pro-chip-row{{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}}
+    .stats-pro-chip{{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);font-weight:700;font-size:13px;}}
+    .stats-pro-chip.accent{{background:#fff;color:#163567;border-color:#fff;}}
+    .stats-pro-grid{{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;}}
+    .stats-pro-kpi{{padding:20px;border-radius:24px;border:1px solid #e4ebf6;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);box-shadow:0 10px 24px rgba(15,23,42,.06);}}
+    .stats-pro-kpi-title{{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#5b6b88;}}
+    .stats-pro-kpi-value{{font-size:34px;font-weight:900;color:#142850;margin:10px 0 8px;line-height:1;}}
+    .stats-pro-caption{{font-size:13px;color:#70819f;}}
+    .stats-pro-meter{{height:10px;border-radius:999px;background:#edf2fb;overflow:hidden;margin-bottom:8px;}}
+    .stats-pro-meter span{{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#1f4f9a 0%,#4ea0ff 100%);}}
+    .stats-pro-panels{{display:grid;grid-template-columns:1.2fr .9fr;gap:18px;}}
+    .stats-pro-panel{{padding:22px;border-radius:26px;border:1px solid #e4ebf6;background:#fff;box-shadow:0 12px 28px rgba(15,23,42,.06);}}
+    .stats-pro-panel-title{{margin:0 0 6px;font-size:21px;color:#142850;}}
+    .stats-pro-panel-sub{{margin:0 0 18px;color:#6b7b95;font-size:14px;line-height:1.55;}}
+    .stats-pro-line{{display:grid;gap:8px;margin-bottom:14px;}}
+    .stats-pro-line:last-child{{margin-bottom:0;}}
+    .stats-pro-line-head{{display:flex;justify-content:space-between;gap:12px;align-items:center;font-weight:700;color:#1f2937;font-size:15px;}}
+    .stats-pro-line-track{{height:12px;border-radius:999px;background:#edf2fb;overflow:hidden;}}
+    .stats-pro-line-track span{{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#1f4f9a 0%,#4ea0ff 100%);}}
+    .stats-pro-line-track.scouting span{{background:linear-gradient(90deg,#0f9d58 0%,#6bd7a8 100%);}}
+    .stats-pro-status-list{{display:grid;gap:12px;}}
+    .stats-pro-status-item{{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:16px 18px;border-radius:18px;background:#f8fbff;border:1px solid #e6edf7;}}
+    .stats-pro-status-title{{font-size:16px;font-weight:800;color:#142850;}}
+    .stats-pro-status-sub{{font-size:13px;color:#70819f;margin-top:4px;}}
+    .stats-pro-pill{{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:999px;font-weight:800;font-size:12px;min-width:96px;}}
+    .stats-pro-pill.ok{{background:#e9f9f0;color:#157347;}}
+    .stats-pro-pill.warn{{background:#fff6df;color:#a16207;}}
+    .stats-pro-pill.danger{{background:#ffebee;color:#b42318;}}
+    .stats-pro-pill.info{{background:#e8f1ff;color:#1d4ed8;}}
+    .stats-pro-triptych{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;}}
+    .stats-pro-mini-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}}
+    .stats-pro-mini{{padding:16px;border-radius:18px;background:#f8fbff;border:1px solid #e6edf7;}}
+    .stats-pro-mini-label{{font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-weight:800;color:#70819f;}}
+    .stats-pro-mini-value{{font-size:24px;font-weight:900;color:#142850;margin-top:8px;}}
+    .stats-pro-table{{width:100%;border-collapse:collapse;}}
+    .stats-pro-table th,.stats-pro-table td{{padding:12px 10px;text-align:left;border-bottom:1px solid #edf2fb;font-size:14px;}}
+    .stats-pro-table th{{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#6b7b95;}}
+    .stats-pro-empty{{color:#70819f;font-style:italic;}}
+    .stats-pro-alerts{{margin:0;padding-left:18px;display:grid;gap:10px;color:#334155;}}
+    .stats-pro-alerts li{{line-height:1.5;}}
+    @media (max-width: 1250px){{.stats-pro-grid{{grid-template-columns:repeat(3,minmax(0,1fr));}}.stats-pro-triptych{{grid-template-columns:1fr;}}}}
+    @media (max-width: 980px){{.stats-pro-panels{{grid-template-columns:1fr;}}.stats-pro-mini-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
+    @media (max-width: 720px){{.stats-pro-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}.stats-pro-mini-grid{{grid-template-columns:1fr;}}.stats-pro-hero h2{{font-size:26px;}}}}
+    @media (max-width: 520px){{.stats-pro-grid{{grid-template-columns:1fr;}}}}
+    </style>
+    <div class='stats-pro-shell'>
+      <div class='stats-pro-hero'>
+        <div>
+          <h2>Dashboard de plantilla</h2>
+          <p>Vista ejecutiva del estado actual de {html.escape(board_team)}: ocupación de plantilla, equilibrio por líneas, scouting, objetivos prioritarios y alertas automáticas para tomar decisiones rápidas.</p>
+          <div class='stats-pro-chip-row'>
+            <span class='stats-pro-chip'>Huecos libres · {open_slots}</span>
+            <span class='stats-pro-chip'>Estado wildcard · {html.escape(wildcard_status)}</span>
+            {wildcard_html}
+          </div>
+        </div>
+      </div>
+
+      <div class='stats-pro-grid'>
+        {''.join(stat_cards_html)}
+      </div>
+
+      <div class='stats-pro-panels'>
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Composición de plantilla</h3>
+          <div class='stats-pro-panel-sub'>Distribución actual frente al objetivo recomendado para una plantilla de 12 jugadoras.</div>
+          {''.join(composition_items)}
+          <div class='stats-pro-mini-grid' style='margin-top:18px;'>
+            {''.join(role_items)}
+          </div>
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Estado de construcción</h3>
+          <div class='stats-pro-panel-sub'>Lectura rápida por líneas para detectar carencias o exceso de perfiles.</div>
+          <div class='stats-pro-status-list'>
+            {''.join(status_items)}
+          </div>
+        </div>
+      </div>
+
+      <div class='stats-pro-triptych'>
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Producción deportiva</h3>
+          <div class='stats-pro-panel-sub'>Totales cargados en las fichas de la plantilla actual.</div>
+          <div class='stats-pro-mini-grid'>
+            {''.join(metric_boxes)}
+          </div>
+          <div class='stats-pro-chip-row' style='margin-top:18px;'>
+            {''.join(physical_badges)}
+          </div>
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Pipeline de scouting</h3>
+          <div class='stats-pro-panel-sub'>Embudo de jugadoras nuevas registradas y su estado actual de seguimiento.</div>
+          {''.join(scouting_funnel)}
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Alertas del staff</h3>
+          <div class='stats-pro-panel-sub'>Señales automáticas generadas a partir del estado actual de la plantilla y el scouting.</div>
+          <ul class='stats-pro-alerts'>
+            {alert_items}
+          </ul>
+        </div>
+      </div>
+
+      <div class='stats-pro-panels'>
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Objetivos prioritarios</h3>
+          <div class='stats-pro-panel-sub'>Top 5 de preselección ordenados por ronda y orden interno.</div>
+          <table class='stats-pro-table'>
+            <thead>
+              <tr><th>Jugadora</th><th>Posición</th><th>Prioridad</th><th>Rating</th></tr>
+            </thead>
+            <tbody>
+              {''.join(objective_table_rows)}
+            </tbody>
+          </table>
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Resumen de scouting</h3>
+          <div class='stats-pro-panel-sub'>Distribución del mercado observado por posición dentro de jugadoras nuevas.</div>
+          <div class='stats-pro-mini-grid'>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Porteras</div><div class='stats-pro-mini-value'>{scouting_positions['Portera']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Defensas</div><div class='stats-pro-mini-value'>{scouting_positions['Defensa']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Medios</div><div class='stats-pro-mini-value'>{scouting_positions['Medio']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Delanteras</div><div class='stats-pro-mini-value'>{scouting_positions['Delantera']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Top</div><div class='stats-pro-mini-value'>{scouting_status_counts['Top']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Prioridad alta</div><div class='stats-pro-mini-value'>{scouting_priority_high}</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+    return dashboard
+
+
 def get_madam_used_legacy_teams():
     conn = get_conn()
     cur = conn.cursor()
@@ -1232,170 +1660,6 @@ def plantilla_home(request: Request):
     return plantilla_layout(request, board_team, "plantilla", render_plantilla_gallery(board_team))
 
 
-def render_plantilla_stats_dashboard(board_team: str) -> str:
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT p.id, p.name, COALESCE(p.position, '')
-        FROM team_player_decisions d
-        JOIN players p ON p.id = d.player_id
-        WHERE d.board_team = %s AND d.status = 'Elegida'
-        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
-        """,
-        (board_team,),
-    )
-    final_rows = cur.fetchall()
-
-    cur.execute(
-        """
-        SELECT p.id, p.name, COALESCE(p.position, '')
-        FROM team_player_decisions d
-        JOIN players p ON p.id = d.player_id
-        WHERE d.board_team = %s AND d.status = 'Objetivo'
-        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
-        """,
-        (board_team,),
-    )
-    objective_rows = cur.fetchall()
-
-    cur.execute("SELECT COUNT(*) FROM new_players")
-    new_total = cur.fetchone()[0]
-
-    cur.execute("SELECT COALESCE(scout_status, 'Seguimiento'), COUNT(*) FROM new_players GROUP BY COALESCE(scout_status, 'Seguimiento')")
-    scouting_counts = {row[0]: row[1] for row in cur.fetchall()}
-
-    cur.close()
-    conn.close()
-
-    position_labels = ["Portera", "Defensa", "Medio", "Delantera"]
-    position_counts = {label: 0 for label in position_labels}
-    for _, _, position in final_rows:
-        clean = (position or "").strip()
-        if clean in position_counts:
-            position_counts[clean] += 1
-
-    total_final = len(final_rows)
-    total_objectives = len(objective_rows)
-    total_goalkeepers = position_counts["Portera"]
-    wildcard_name = get_wildcard(board_team).strip()
-    wildcard_value = html.escape(wildcard_name) if wildcard_name else "No definida"
-    wildcard_subtitle = "Wildcard asignada" if wildcard_name else "Pendiente de definir"
-
-    max_pos = max(max(position_counts.values(), default=0), 1)
-    position_cards = []
-    short_labels = {"Portera": "POR", "Defensa": "DEF", "Medio": "MED", "Delantera": "ATA"}
-    for label in position_labels:
-        count = position_counts[label]
-        width = max(14, int((count / max_pos) * 100)) if count else 14
-        position_cards.append(
-            f"<div class='stats-position-row'><div class='stats-position-head'><span>{html.escape(label)}</span><strong>{count}</strong></div><div class='stats-position-track'><div class='stats-position-fill' style='width:{width}%;'></div></div><div class='stats-position-code'>{short_labels[label]}</div></div>"
-        )
-
-    final_list = []
-    for idx, (_, name, position) in enumerate(final_rows[:6], start=1):
-        final_list.append(
-            f"<div class='stats-list-item'><span class='stats-list-rank'>{idx}</span><div><strong>{html.escape(name or 'Jugadora')}</strong><div class='muted'>{html.escape(position or 'Sin posición')}</div></div></div>"
-        )
-    if not final_list:
-        final_list.append("<div class='muted'>Todavía no hay jugadoras en la plantilla definitiva.</div>")
-
-    objective_list = []
-    for idx, (_, name, position) in enumerate(objective_rows[:6], start=1):
-        objective_list.append(
-            f"<div class='stats-list-item'><span class='stats-list-rank alt'>{idx}</span><div><strong>{html.escape(name or 'Jugadora')}</strong><div class='muted'>{html.escape(position or 'Sin posición')}</div></div></div>"
-        )
-    if not objective_list:
-        objective_list.append("<div class='muted'>No hay objetivos cargados en este equipo.</div>")
-
-    scouting_order = ["Top", "Interesante", "Seguimiento", "Descartada"]
-    scouting_blocks = []
-    for label in scouting_order:
-        scouting_blocks.append(
-            f"<div class='scouting-mini-card'><div class='muted'>{html.escape(label)}</div><div class='scouting-mini-value'>{scouting_counts.get(label, 0)}</div></div>"
-        )
-
-    card = lambda title, value, subtitle, tone='': (
-        f"<article class='stats-card {tone}'><div class='stats-card-label'>{title}</div><div class='stats-card-value'>{value}</div><div class='stats-card-subtitle'>{subtitle}</div></article>"
-    )
-
-    body = (
-        "<style>"
-        ".stats-dashboard{display:grid;gap:22px;}"
-        ".stats-top-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;}"
-        ".stats-card{background:linear-gradient(180deg,#ffffff 0%,#f7faff 100%);border:1px solid #dce6f5;border-radius:24px;padding:22px;box-shadow:0 16px 30px rgba(15,23,42,0.06);min-height:146px;}"
-        ".stats-card.emphasis{background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);border-color:#1b2f63;color:#fff;box-shadow:0 18px 34px rgba(27,47,99,0.24);}"
-        ".stats-card.warm{background:linear-gradient(135deg,#fff7ed 0%,#ffedd5 100%);border-color:#fdba74;}"
-        ".stats-card.success{background:linear-gradient(135deg,#ecfdf5 0%,#d1fae5 100%);border-color:#86efac;}"
-        ".stats-card-label{font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;opacity:.72;}"
-        ".stats-card-value{font-size:42px;line-height:1;margin:16px 0 10px;font-weight:900;}"
-        ".stats-card-subtitle{font-size:14px;line-height:1.45;opacity:.86;font-weight:600;}"
-        ".stats-main-grid{display:grid;grid-template-columns:1.45fr .95fr;gap:22px;}"
-        ".stats-panel{background:#fff;border:1px solid #e5e7eb;border-radius:26px;padding:24px;box-shadow:0 16px 32px rgba(15,23,42,0.06);}"
-        ".stats-panel h2{margin:0 0 8px;font-size:24px;color:#142850;}"
-        ".stats-panel .panel-subtitle{margin-bottom:22px;}"
-        ".stats-position-row{display:grid;grid-template-columns:minmax(88px,120px) 1fr 44px;gap:14px;align-items:center;margin-bottom:16px;}"
-        ".stats-position-head{display:flex;justify-content:space-between;gap:10px;font-weight:800;color:#1f2937;}"
-        ".stats-position-track{height:14px;border-radius:999px;background:#edf2f7;overflow:hidden;}"
-        ".stats-position-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#2f5bea 0%,#5b8cff 100%);box-shadow:0 8px 16px rgba(47,91,234,0.22);}"
-        ".stats-position-code{font-size:12px;font-weight:900;color:#6b7280;text-align:right;letter-spacing:.08em;}"
-        ".stats-side-stack{display:grid;gap:22px;}"
-        ".stats-list{display:grid;gap:12px;}"
-        ".stats-list-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:#f8fbff;border:1px solid #e3ecfa;}"
-        ".stats-list-rank{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;background:#1b2f63;color:#fff;font-size:13px;font-weight:900;flex:0 0 auto;}"
-        ".stats-list-rank.alt{background:#f59e0b;color:#fff;}"
-        ".scouting-mini-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:16px;}"
-        ".scouting-mini-card{border-radius:18px;padding:16px;background:#f8fbff;border:1px solid #e3ecfa;text-align:center;}"
-        ".scouting-mini-value{font-size:28px;font-weight:900;color:#142850;margin-top:6px;}"
-        ".stats-foot-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;}"
-        ".stats-note{padding:16px 18px;border-radius:18px;background:#f8fafc;border:1px dashed #cbd5e1;color:#475569;font-weight:600;line-height:1.55;}"
-        "@media (max-width: 1180px){.stats-top-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.stats-main-grid,.stats-foot-grid{grid-template-columns:1fr;}.scouting-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}"
-        "@media (max-width: 640px){.stats-top-grid{grid-template-columns:1fr;}.stats-card-value{font-size:36px;}.stats-position-row{grid-template-columns:1fr;gap:8px;}.stats-position-code{text-align:left;}.scouting-mini-grid{grid-template-columns:1fr 1fr;}}"
-        "</style>"
-        "<div class='stats-dashboard'>"
-        "<div class='stats-top-grid'>"
-        + card("Plantilla actual", str(total_final), "Jugadoras elegidas en este equipo", "emphasis")
-        + card("Porteras", str(total_goalkeepers), "Cobertura específica de portería", "success")
-        + card("Objetivos", str(total_objectives), "Jugadoras activas en preselección", "warm")
-        + card("Scouting", str(new_total), "Jugadoras nuevas cargadas en base de datos")
-        + "</div>"
-        "<div class='stats-main-grid'>"
-            "<section class='stats-panel'>"
-                "<h2>Distribución de plantilla</h2>"
-                "<div class='muted panel-subtitle'>Lectura rápida del equilibrio actual del equipo.</div>"
-                + "".join(position_cards)
-                + f"<div class='stats-note' style='margin-top:6px;'><strong>Wildcard:</strong> {wildcard_value}<br><span class='muted'>{wildcard_subtitle}</span></div>"
-            "</section>"
-            "<div class='stats-side-stack'>"
-                "<section class='stats-panel'>"
-                    "<h2>Plantilla definitiva</h2>"
-                    f"<div class='muted panel-subtitle'>Primeras {min(len(final_rows), 6)} jugadoras de la plantilla actual.</div>"
-                    f"<div class='stats-list'>{''.join(final_list)}</div>"
-                "</section>"
-                "<section class='stats-panel'>"
-                    "<h2>Objetivos activos</h2>"
-                    f"<div class='muted panel-subtitle'>Primeras {min(len(objective_rows), 6)} jugadoras en seguimiento del equipo.</div>"
-                    f"<div class='stats-list'>{''.join(objective_list)}</div>"
-                "</section>"
-            "</div>"
-        "</div>"
-        "<div class='stats-foot-grid'>"
-            "<section class='stats-panel'>"
-                "<h2>Scouting general</h2>"
-                "<div class='muted panel-subtitle'>Estado de la base de jugadoras nuevas disponible en el sistema.</div>"
-                f"<div class='scouting-mini-grid'>{''.join(scouting_blocks)}</div>"
-            "</section>"
-            "<section class='stats-panel'>"
-                "<h2>Lectura rápida</h2>"
-                f"<div class='stats-note'><strong>{html.escape(board_team)}</strong> tiene ahora mismo <strong>{total_final}</strong> jugadoras en plantilla, <strong>{total_goalkeepers}</strong> porteras y <strong>{total_objectives}</strong> objetivos activos. Esta pantalla está pensada como dashboard visual y no modifica ninguna lógica existente del draft, la plantilla, la pizarra o el calendario.</div>"
-            "</section>"
-        "</div>"
-        "</div>"
-    )
-    return body
-
-
 @app.get("/plantilla/estadisticas", response_class=HTMLResponse)
 def plantilla_estadisticas(request: Request):
     user = require_user(request)
@@ -1404,8 +1668,7 @@ def plantilla_estadisticas(request: Request):
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    body = render_plantilla_stats_dashboard(board_team)
-    return plantilla_layout(request, board_team, "estadisticas", body)
+    return plantilla_layout(request, board_team, "estadisticas", render_plantilla_estadisticas(board_team))
 
 
 @app.get("/plantilla/calendario", response_class=HTMLResponse)
