@@ -887,7 +887,7 @@ def login_page(request: Request, error: str = ""):
         "<form action='/login' method='post'>"
         "<div style='margin:12px 0;'><label>Usuario</label><input name='username' required></div>"
         "<div style='margin:12px 0;'><label>Contraseña</label><input type='password' name='password' required></div>"
-        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Draft Manager Kings&amp;Queens League<br>&copy; Josep Maria Bofill &ndash; Todos los derechos reservados<br>Queda prohibida su reproducción o explotación comercial sin autorización expresa del autor.</div></div></div>"
+        "<button type='submit'>Entrar</button></form><div class='muted' style='margin-top:18px;text-align:center;font-size:12px;'>Aplicación desarrollada por Aniol y Gusiluz.<br>Prohibida su venta, reproducción o distribución sin autorización del propietario.</div></div></div>"
     )
 
 
@@ -1232,6 +1232,170 @@ def plantilla_home(request: Request):
     return plantilla_layout(request, board_team, "plantilla", render_plantilla_gallery(board_team))
 
 
+def render_plantilla_stats_dashboard(board_team: str) -> str:
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT p.id, p.name, COALESCE(p.position, '')
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team = %s AND d.status = 'Elegida'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        """,
+        (board_team,),
+    )
+    final_rows = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT p.id, p.name, COALESCE(p.position, '')
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team = %s AND d.status = 'Objetivo'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        """,
+        (board_team,),
+    )
+    objective_rows = cur.fetchall()
+
+    cur.execute("SELECT COUNT(*) FROM new_players")
+    new_total = cur.fetchone()[0]
+
+    cur.execute("SELECT COALESCE(scout_status, 'Seguimiento'), COUNT(*) FROM new_players GROUP BY COALESCE(scout_status, 'Seguimiento')")
+    scouting_counts = {row[0]: row[1] for row in cur.fetchall()}
+
+    cur.close()
+    conn.close()
+
+    position_labels = ["Portera", "Defensa", "Medio", "Delantera"]
+    position_counts = {label: 0 for label in position_labels}
+    for _, _, position in final_rows:
+        clean = (position or "").strip()
+        if clean in position_counts:
+            position_counts[clean] += 1
+
+    total_final = len(final_rows)
+    total_objectives = len(objective_rows)
+    total_goalkeepers = position_counts["Portera"]
+    wildcard_name = get_wildcard(board_team).strip()
+    wildcard_value = html.escape(wildcard_name) if wildcard_name else "No definida"
+    wildcard_subtitle = "Wildcard asignada" if wildcard_name else "Pendiente de definir"
+
+    max_pos = max(max(position_counts.values(), default=0), 1)
+    position_cards = []
+    short_labels = {"Portera": "POR", "Defensa": "DEF", "Medio": "MED", "Delantera": "ATA"}
+    for label in position_labels:
+        count = position_counts[label]
+        width = max(14, int((count / max_pos) * 100)) if count else 14
+        position_cards.append(
+            f"<div class='stats-position-row'><div class='stats-position-head'><span>{html.escape(label)}</span><strong>{count}</strong></div><div class='stats-position-track'><div class='stats-position-fill' style='width:{width}%;'></div></div><div class='stats-position-code'>{short_labels[label]}</div></div>"
+        )
+
+    final_list = []
+    for idx, (_, name, position) in enumerate(final_rows[:6], start=1):
+        final_list.append(
+            f"<div class='stats-list-item'><span class='stats-list-rank'>{idx}</span><div><strong>{html.escape(name or 'Jugadora')}</strong><div class='muted'>{html.escape(position or 'Sin posición')}</div></div></div>"
+        )
+    if not final_list:
+        final_list.append("<div class='muted'>Todavía no hay jugadoras en la plantilla definitiva.</div>")
+
+    objective_list = []
+    for idx, (_, name, position) in enumerate(objective_rows[:6], start=1):
+        objective_list.append(
+            f"<div class='stats-list-item'><span class='stats-list-rank alt'>{idx}</span><div><strong>{html.escape(name or 'Jugadora')}</strong><div class='muted'>{html.escape(position or 'Sin posición')}</div></div></div>"
+        )
+    if not objective_list:
+        objective_list.append("<div class='muted'>No hay objetivos cargados en este equipo.</div>")
+
+    scouting_order = ["Top", "Interesante", "Seguimiento", "Descartada"]
+    scouting_blocks = []
+    for label in scouting_order:
+        scouting_blocks.append(
+            f"<div class='scouting-mini-card'><div class='muted'>{html.escape(label)}</div><div class='scouting-mini-value'>{scouting_counts.get(label, 0)}</div></div>"
+        )
+
+    card = lambda title, value, subtitle, tone='': (
+        f"<article class='stats-card {tone}'><div class='stats-card-label'>{title}</div><div class='stats-card-value'>{value}</div><div class='stats-card-subtitle'>{subtitle}</div></article>"
+    )
+
+    body = (
+        "<style>"
+        ".stats-dashboard{display:grid;gap:22px;}"
+        ".stats-top-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;}"
+        ".stats-card{background:linear-gradient(180deg,#ffffff 0%,#f7faff 100%);border:1px solid #dce6f5;border-radius:24px;padding:22px;box-shadow:0 16px 30px rgba(15,23,42,0.06);min-height:146px;}"
+        ".stats-card.emphasis{background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);border-color:#1b2f63;color:#fff;box-shadow:0 18px 34px rgba(27,47,99,0.24);}"
+        ".stats-card.warm{background:linear-gradient(135deg,#fff7ed 0%,#ffedd5 100%);border-color:#fdba74;}"
+        ".stats-card.success{background:linear-gradient(135deg,#ecfdf5 0%,#d1fae5 100%);border-color:#86efac;}"
+        ".stats-card-label{font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;opacity:.72;}"
+        ".stats-card-value{font-size:42px;line-height:1;margin:16px 0 10px;font-weight:900;}"
+        ".stats-card-subtitle{font-size:14px;line-height:1.45;opacity:.86;font-weight:600;}"
+        ".stats-main-grid{display:grid;grid-template-columns:1.45fr .95fr;gap:22px;}"
+        ".stats-panel{background:#fff;border:1px solid #e5e7eb;border-radius:26px;padding:24px;box-shadow:0 16px 32px rgba(15,23,42,0.06);}"
+        ".stats-panel h2{margin:0 0 8px;font-size:24px;color:#142850;}"
+        ".stats-panel .panel-subtitle{margin-bottom:22px;}"
+        ".stats-position-row{display:grid;grid-template-columns:minmax(88px,120px) 1fr 44px;gap:14px;align-items:center;margin-bottom:16px;}"
+        ".stats-position-head{display:flex;justify-content:space-between;gap:10px;font-weight:800;color:#1f2937;}"
+        ".stats-position-track{height:14px;border-radius:999px;background:#edf2f7;overflow:hidden;}"
+        ".stats-position-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#2f5bea 0%,#5b8cff 100%);box-shadow:0 8px 16px rgba(47,91,234,0.22);}"
+        ".stats-position-code{font-size:12px;font-weight:900;color:#6b7280;text-align:right;letter-spacing:.08em;}"
+        ".stats-side-stack{display:grid;gap:22px;}"
+        ".stats-list{display:grid;gap:12px;}"
+        ".stats-list-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:#f8fbff;border:1px solid #e3ecfa;}"
+        ".stats-list-rank{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;background:#1b2f63;color:#fff;font-size:13px;font-weight:900;flex:0 0 auto;}"
+        ".stats-list-rank.alt{background:#f59e0b;color:#fff;}"
+        ".scouting-mini-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:16px;}"
+        ".scouting-mini-card{border-radius:18px;padding:16px;background:#f8fbff;border:1px solid #e3ecfa;text-align:center;}"
+        ".scouting-mini-value{font-size:28px;font-weight:900;color:#142850;margin-top:6px;}"
+        ".stats-foot-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;}"
+        ".stats-note{padding:16px 18px;border-radius:18px;background:#f8fafc;border:1px dashed #cbd5e1;color:#475569;font-weight:600;line-height:1.55;}"
+        "@media (max-width: 1180px){.stats-top-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.stats-main-grid,.stats-foot-grid{grid-template-columns:1fr;}.scouting-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}"
+        "@media (max-width: 640px){.stats-top-grid{grid-template-columns:1fr;}.stats-card-value{font-size:36px;}.stats-position-row{grid-template-columns:1fr;gap:8px;}.stats-position-code{text-align:left;}.scouting-mini-grid{grid-template-columns:1fr 1fr;}}"
+        "</style>"
+        "<div class='stats-dashboard'>"
+        "<div class='stats-top-grid'>"
+        + card("Plantilla actual", str(total_final), "Jugadoras elegidas en este equipo", "emphasis")
+        + card("Porteras", str(total_goalkeepers), "Cobertura específica de portería", "success")
+        + card("Objetivos", str(total_objectives), "Jugadoras activas en preselección", "warm")
+        + card("Scouting", str(new_total), "Jugadoras nuevas cargadas en base de datos")
+        + "</div>"
+        "<div class='stats-main-grid'>"
+            "<section class='stats-panel'>"
+                "<h2>Distribución de plantilla</h2>"
+                "<div class='muted panel-subtitle'>Lectura rápida del equilibrio actual del equipo.</div>"
+                + "".join(position_cards)
+                + f"<div class='stats-note' style='margin-top:6px;'><strong>Wildcard:</strong> {wildcard_value}<br><span class='muted'>{wildcard_subtitle}</span></div>"
+            "</section>"
+            "<div class='stats-side-stack'>"
+                "<section class='stats-panel'>"
+                    "<h2>Plantilla definitiva</h2>"
+                    f"<div class='muted panel-subtitle'>Primeras {min(len(final_rows), 6)} jugadoras de la plantilla actual.</div>"
+                    f"<div class='stats-list'>{''.join(final_list)}</div>"
+                "</section>"
+                "<section class='stats-panel'>"
+                    "<h2>Objetivos activos</h2>"
+                    f"<div class='muted panel-subtitle'>Primeras {min(len(objective_rows), 6)} jugadoras en seguimiento del equipo.</div>"
+                    f"<div class='stats-list'>{''.join(objective_list)}</div>"
+                "</section>"
+            "</div>"
+        "</div>"
+        "<div class='stats-foot-grid'>"
+            "<section class='stats-panel'>"
+                "<h2>Scouting general</h2>"
+                "<div class='muted panel-subtitle'>Estado de la base de jugadoras nuevas disponible en el sistema.</div>"
+                f"<div class='scouting-mini-grid'>{''.join(scouting_blocks)}</div>"
+            "</section>"
+            "<section class='stats-panel'>"
+                "<h2>Lectura rápida</h2>"
+                f"<div class='stats-note'><strong>{html.escape(board_team)}</strong> tiene ahora mismo <strong>{total_final}</strong> jugadoras en plantilla, <strong>{total_goalkeepers}</strong> porteras y <strong>{total_objectives}</strong> objetivos activos. Esta pantalla está pensada como dashboard visual y no modifica ninguna lógica existente del draft, la plantilla, la pizarra o el calendario.</div>"
+            "</section>"
+        "</div>"
+        "</div>"
+    )
+    return body
+
+
 @app.get("/plantilla/estadisticas", response_class=HTMLResponse)
 def plantilla_estadisticas(request: Request):
     user = require_user(request)
@@ -1240,12 +1404,7 @@ def plantilla_estadisticas(request: Request):
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    body = (
-        "<div class='module-placeholder'>"
-        "<h2>Estadísticas</h2>"
-        "<div class='muted'>Espacio preparado para métricas deportivas, medias y evolución del equipo.</div>"
-        "</div>"
-    )
+    body = render_plantilla_stats_dashboard(board_team)
     return plantilla_layout(request, board_team, "estadisticas", body)
 
 
