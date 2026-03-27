@@ -4,6 +4,8 @@ import io
 import html
 import hashlib
 import json
+import calendar
+from datetime import date, datetime
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
@@ -85,6 +87,24 @@ def get_conn():
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS team_calendar_events (
+                id SERIAL PRIMARY KEY,
+                board_team TEXT NOT NULL,
+                event_date DATE NOT NULL,
+                event_title TEXT NOT NULL,
+                event_type TEXT NOT NULL DEFAULT 'otro',
+                event_time TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by TEXT DEFAULT ''
+            )
+            """
+        )
+        cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS event_time TEXT DEFAULT ''")
+        cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''")
+        cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''")
         conn.commit()
         cur.close()
     except Exception:
@@ -227,6 +247,24 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_calendar_events (
+            id SERIAL PRIMARY KEY,
+            board_team TEXT NOT NULL,
+            event_date DATE NOT NULL,
+            event_title TEXT NOT NULL,
+            event_type TEXT NOT NULL DEFAULT 'otro',
+            event_time TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT DEFAULT ''
+        )
+        """
+    )
+    cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS event_time TEXT DEFAULT ''")
+    cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''")
+    cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''")
     conn.commit()
     cur.close()
     conn.close()
@@ -710,6 +748,434 @@ def get_team_counts(board_team: str):
         "Medio": counts.get("Medio", 0),
         "Delantera": counts.get("Delantera", 0),
     }
+
+
+
+def render_plantilla_estadisticas(board_team: str) -> str:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            COALESCE(p.position, ''),
+            p.age,
+            p.rating,
+            COALESCE(p.squad_role, ''),
+            COALESCE(p.physical_status, ''),
+            COALESCE(p.season_matches, 0),
+            COALESCE(p.season_goals, 0),
+            COALESCE(p.season_assists, 0),
+            COALESCE(p.season_minutes, 0)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s AND d.status='Elegida'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        """,
+        (board_team,),
+    )
+    final_rows = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT
+            p.id,
+            p.name,
+            COALESCE(p.position, ''),
+            COALESCE(d.draft_round, 999),
+            COALESCE(d.round_order, 999),
+            COALESCE(p.rating, 0)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team=%s AND d.status='Objetivo'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        LIMIT 5
+        """,
+        (board_team,),
+    )
+    objective_rows = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT
+            COALESCE(position, ''),
+            COALESCE(scout_status, 'Seguimiento'),
+            COALESCE(priority_level, ''),
+            COALESCE(estimated_level, '')
+        FROM new_players
+        """
+    )
+    scouting_rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    final_total = len(final_rows)
+    open_slots = max(0, 12 - final_total)
+    wildcard_name = (get_wildcard(board_team) or "").strip()
+    wildcard_status = "Asignada" if wildcard_name else "Pendiente"
+
+    positions = {"Portera": 0, "Defensa": 0, "Medio": 0, "Delantera": 0}
+    role_counts = {"Titular": 0, "Rotación": 0, "Desarrollo": 0}
+    physical_counts = {}
+    ages, ratings = [], []
+    matches = goals = assists = minutes = 0
+
+    for position, age, rating, squad_role, physical_status, season_matches, season_goals, season_assists, season_minutes in final_rows:
+        pos = (position or "").strip()
+        if pos in positions:
+            positions[pos] += 1
+        if age is not None:
+            try:
+                ages.append(float(age))
+            except Exception:
+                pass
+        if rating is not None:
+            try:
+                ratings.append(float(rating))
+            except Exception:
+                pass
+        matches += int(season_matches or 0)
+        goals += int(season_goals or 0)
+        assists += int(season_assists or 0)
+        minutes += int(season_minutes or 0)
+
+        normalized_role = (squad_role or "").strip().lower()
+        if "tit" in normalized_role:
+            role_counts["Titular"] += 1
+        elif "rota" in normalized_role:
+            role_counts["Rotación"] += 1
+        elif normalized_role:
+            role_counts["Desarrollo"] += 1
+
+        normalized_physical = (physical_status or "").strip() or "Sin dato"
+        physical_counts[normalized_physical] = physical_counts.get(normalized_physical, 0) + 1
+
+    age_avg = round(sum(ages) / len(ages), 1) if ages else None
+    rating_avg = round(sum(ratings) / len(ratings), 1) if ratings else None
+
+    scouting_total = len(scouting_rows)
+    scouting_status_counts = {"Top": 0, "Interesante": 0, "Seguimiento": 0, "Descartada": 0}
+    scouting_priority_high = 0
+    scouting_positions = {"Portera": 0, "Defensa": 0, "Medio": 0, "Delantera": 0}
+
+    for position, scout_status, priority_level, estimated_level in scouting_rows:
+        status_norm = (scout_status or "").strip().lower()
+        if "top" in status_norm:
+            scouting_status_counts["Top"] += 1
+        elif "inter" in status_norm:
+            scouting_status_counts["Interesante"] += 1
+        elif "desc" in status_norm:
+            scouting_status_counts["Descartada"] += 1
+        else:
+            scouting_status_counts["Seguimiento"] += 1
+
+        priority_norm = f"{priority_level or ''} {estimated_level or ''}".lower()
+        if any(token in priority_norm for token in ["alta", "high", "top", "prior"]):
+            scouting_priority_high += 1
+
+        pos = (position or "").strip()
+        if pos in scouting_positions:
+            scouting_positions[pos] += 1
+
+    target_counts = {"Portera": 2, "Defensa": 4, "Medio": 4, "Delantera": 2}
+
+    def fmt_number(value):
+        return f"{value:.1f}".replace(".", ",")
+
+    def progress_pct(current, total):
+        if total <= 0:
+            return 0
+        return max(0, min(100, int(round((current / total) * 100))))
+
+    def line_status(position_key):
+        current = positions.get(position_key, 0)
+        target = target_counts.get(position_key, 0)
+        if current == 0:
+            return "Crítica", "danger"
+        if current < target:
+            return "Pendiente", "warn"
+        if current == target:
+            return "Correcta", "ok"
+        return "Exceso", "info"
+
+    alerts = []
+    if open_slots > 0:
+        alerts.append(f"Faltan {open_slots} plazas para cerrar la plantilla.")
+    else:
+        alerts.append("Plantilla completa de 12 jugadoras.")
+    if positions["Portera"] < target_counts["Portera"]:
+        alerts.append("La portería está incompleta.")
+    if positions["Delantera"] < target_counts["Delantera"]:
+        alerts.append("Falta profundidad ofensiva.")
+    if positions["Medio"] > target_counts["Medio"]:
+        alerts.append("Hay exceso de perfiles de medio.")
+    if scouting_priority_high > 0:
+        alerts.append(f"Hay {scouting_priority_high} perfiles de scouting en prioridad alta.")
+    if wildcard_name:
+        alerts.append(f"Wildcard asignada a {wildcard_name}.")
+    if not objective_rows:
+        alerts.append("No hay objetivos activos en preselección.")
+
+    cards = [
+        ("Plantilla", f"{final_total}/12", "Plazas ocupadas", progress_pct(final_total, 12)),
+        ("Porteras", f"{positions['Portera']}/2", "Cobertura de portería", progress_pct(positions["Portera"], 2)),
+        ("Edad media", fmt_number(age_avg) if age_avg is not None else "—", "Promedio de plantilla", None),
+        ("Nivel medio", fmt_number(rating_avg) if rating_avg is not None else "—", "Rating medio actual", None),
+        ("Scouting", str(scouting_total), "Jugadoras nuevas registradas", None),
+        ("Objetivos", str(len(objective_rows)), "Prioridades activas", None),
+    ]
+
+    stat_cards_html = []
+    for title, value, caption, pct in cards:
+        meter = ""
+        if pct is not None:
+            meter = (
+                f"<div class='stats-pro-meter'><span style='width:{pct}%;'></span></div>"
+                f"<div class='stats-pro-caption'>{caption}</div>"
+            )
+        else:
+            meter = f"<div class='stats-pro-caption'>{html.escape(caption)}</div>"
+        stat_cards_html.append(
+            "<div class='stats-pro-kpi'>"
+            f"<div class='stats-pro-kpi-title'>{html.escape(title)}</div>"
+            f"<div class='stats-pro-kpi-value'>{html.escape(str(value))}</div>"
+            f"{meter}"
+            "</div>"
+        )
+
+    composition_items = []
+    max_target = max(target_counts.values()) or 1
+    for label in ["Portera", "Defensa", "Medio", "Delantera"]:
+        current = positions[label]
+        target = target_counts[label]
+        pct = progress_pct(current, max_target)
+        composition_items.append(
+            "<div class='stats-pro-line'>"
+            f"<div class='stats-pro-line-head'><span>{html.escape(label)}</span><strong>{current}/{target}</strong></div>"
+            f"<div class='stats-pro-line-track'><span style='width:{pct}%;'></span></div>"
+            "</div>"
+        )
+
+    status_items = []
+    for label in ["Portera", "Defensa", "Medio", "Delantera"]:
+        status_text, tone = line_status(label)
+        status_items.append(
+            "<div class='stats-pro-status-item'>"
+            f"<div><div class='stats-pro-status-title'>{html.escape(label)}</div>"
+            f"<div class='stats-pro-status-sub'>{positions[label]}/{target_counts[label]} jugadoras</div></div>"
+            f"<span class='stats-pro-pill {tone}'>{html.escape(status_text)}</span>"
+            "</div>"
+        )
+
+    role_items = []
+    for label, count in role_counts.items():
+        role_items.append(
+            "<div class='stats-pro-mini'>"
+            f"<div class='stats-pro-mini-label'>{html.escape(label)}</div>"
+            f"<div class='stats-pro-mini-value'>{count}</div>"
+            "</div>"
+        )
+
+    metrics_items = [
+        ("Partidos", matches),
+        ("Goles", goals),
+        ("Asistencias", assists),
+        ("Minutos", minutes),
+    ]
+    metric_boxes = []
+    for label, value in metrics_items:
+        metric_boxes.append(
+            "<div class='stats-pro-mini'>"
+            f"<div class='stats-pro-mini-label'>{html.escape(label)}</div>"
+            f"<div class='stats-pro-mini-value'>{html.escape(str(value))}</div>"
+            "</div>"
+        )
+
+    scouting_funnel = []
+    for label in ["Top", "Interesante", "Seguimiento", "Descartada"]:
+        value = scouting_status_counts[label]
+        pct = progress_pct(value, scouting_total or 1)
+        scouting_funnel.append(
+            "<div class='stats-pro-line'>"
+            f"<div class='stats-pro-line-head'><span>{html.escape(label)}</span><strong>{value}</strong></div>"
+            f"<div class='stats-pro-line-track scouting'><span style='width:{pct}%;'></span></div>"
+            "</div>"
+        )
+
+    objective_table_rows = []
+    if objective_rows:
+        for _player_id, name, position, draft_round, round_order, rating in objective_rows:
+            round_text = "—" if draft_round in (None, 999) else f"R{int(draft_round)}"
+            order_text = "" if round_order in (None, 999) else f" · #{int(round_order)}"
+            rating_text = "—" if not rating else str(int(rating))
+            objective_table_rows.append(
+                "<tr>"
+                f"<td>{html.escape(name or '')}</td>"
+                f"<td>{html.escape(position or '—')}</td>"
+                f"<td>{html.escape(round_text + order_text)}</td>"
+                f"<td>{html.escape(rating_text)}</td>"
+                "</tr>"
+            )
+    else:
+        objective_table_rows.append("<tr><td colspan='4' class='stats-pro-empty'>No hay objetivos activos.</td></tr>")
+
+    alert_items = "".join(f"<li>{html.escape(msg)}</li>" for msg in alerts[:5])
+
+    physical_badges = []
+    for label, count in sorted(physical_counts.items(), key=lambda item: (-item[1], item[0])):
+        physical_badges.append(f"<span class='stats-pro-chip'>{html.escape(label)} · {count}</span>")
+    if not physical_badges:
+        physical_badges.append("<span class='stats-pro-chip'>Sin datos físicos todavía</span>")
+
+    wildcard_html = (
+        f"<span class='stats-pro-chip accent'>Wildcard · {html.escape(wildcard_name)}</span>"
+        if wildcard_name else
+        "<span class='stats-pro-chip'>Wildcard pendiente</span>"
+    )
+
+    dashboard = f"""
+    <style>
+    .stats-pro-shell{{display:grid;gap:18px;}}
+    .stats-pro-hero{{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;padding:26px;border-radius:28px;background:linear-gradient(135deg,#132a57 0%,#1f4f9a 100%);color:#fff;box-shadow:0 18px 45px rgba(15,23,42,.16);}}
+    .stats-pro-hero h2{{margin:0 0 8px;font-size:32px;color:#fff;}}
+    .stats-pro-hero p{{margin:0;color:rgba(255,255,255,.82);max-width:760px;line-height:1.6;font-size:15px;}}
+    .stats-pro-chip-row{{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}}
+    .stats-pro-chip{{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);font-weight:700;font-size:13px;}}
+    .stats-pro-chip.accent{{background:#fff;color:#163567;border-color:#fff;}}
+    .stats-pro-grid{{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;}}
+    .stats-pro-kpi{{padding:20px;border-radius:24px;border:1px solid #e4ebf6;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);box-shadow:0 10px 24px rgba(15,23,42,.06);}}
+    .stats-pro-kpi-title{{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#5b6b88;}}
+    .stats-pro-kpi-value{{font-size:34px;font-weight:900;color:#142850;margin:10px 0 8px;line-height:1;}}
+    .stats-pro-caption{{font-size:13px;color:#70819f;}}
+    .stats-pro-meter{{height:10px;border-radius:999px;background:#edf2fb;overflow:hidden;margin-bottom:8px;}}
+    .stats-pro-meter span{{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#1f4f9a 0%,#4ea0ff 100%);}}
+    .stats-pro-panels{{display:grid;grid-template-columns:1.2fr .9fr;gap:18px;}}
+    .stats-pro-panel{{padding:22px;border-radius:26px;border:1px solid #e4ebf6;background:#fff;box-shadow:0 12px 28px rgba(15,23,42,.06);}}
+    .stats-pro-panel-title{{margin:0 0 6px;font-size:21px;color:#142850;}}
+    .stats-pro-panel-sub{{margin:0 0 18px;color:#6b7b95;font-size:14px;line-height:1.55;}}
+    .stats-pro-line{{display:grid;gap:8px;margin-bottom:14px;}}
+    .stats-pro-line:last-child{{margin-bottom:0;}}
+    .stats-pro-line-head{{display:flex;justify-content:space-between;gap:12px;align-items:center;font-weight:700;color:#1f2937;font-size:15px;}}
+    .stats-pro-line-track{{height:12px;border-radius:999px;background:#edf2fb;overflow:hidden;}}
+    .stats-pro-line-track span{{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#1f4f9a 0%,#4ea0ff 100%);}}
+    .stats-pro-line-track.scouting span{{background:linear-gradient(90deg,#0f9d58 0%,#6bd7a8 100%);}}
+    .stats-pro-status-list{{display:grid;gap:12px;}}
+    .stats-pro-status-item{{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:16px 18px;border-radius:18px;background:#f8fbff;border:1px solid #e6edf7;}}
+    .stats-pro-status-title{{font-size:16px;font-weight:800;color:#142850;}}
+    .stats-pro-status-sub{{font-size:13px;color:#70819f;margin-top:4px;}}
+    .stats-pro-pill{{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:999px;font-weight:800;font-size:12px;min-width:96px;}}
+    .stats-pro-pill.ok{{background:#e9f9f0;color:#157347;}}
+    .stats-pro-pill.warn{{background:#fff6df;color:#a16207;}}
+    .stats-pro-pill.danger{{background:#ffebee;color:#b42318;}}
+    .stats-pro-pill.info{{background:#e8f1ff;color:#1d4ed8;}}
+    .stats-pro-triptych{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;}}
+    .stats-pro-mini-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}}
+    .stats-pro-mini{{padding:16px;border-radius:18px;background:#f8fbff;border:1px solid #e6edf7;}}
+    .stats-pro-mini-label{{font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-weight:800;color:#70819f;}}
+    .stats-pro-mini-value{{font-size:24px;font-weight:900;color:#142850;margin-top:8px;}}
+    .stats-pro-table{{width:100%;border-collapse:collapse;}}
+    .stats-pro-table th,.stats-pro-table td{{padding:12px 10px;text-align:left;border-bottom:1px solid #edf2fb;font-size:14px;}}
+    .stats-pro-table th{{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#6b7b95;}}
+    .stats-pro-empty{{color:#70819f;font-style:italic;}}
+    .stats-pro-alerts{{margin:0;padding-left:18px;display:grid;gap:10px;color:#334155;}}
+    .stats-pro-alerts li{{line-height:1.5;}}
+    @media (max-width: 1250px){{.stats-pro-grid{{grid-template-columns:repeat(3,minmax(0,1fr));}}.stats-pro-triptych{{grid-template-columns:1fr;}}}}
+    @media (max-width: 980px){{.stats-pro-panels{{grid-template-columns:1fr;}}.stats-pro-mini-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}}}
+    @media (max-width: 720px){{.stats-pro-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}.stats-pro-mini-grid{{grid-template-columns:1fr;}}.stats-pro-hero h2{{font-size:26px;}}}}
+    @media (max-width: 520px){{.stats-pro-grid{{grid-template-columns:1fr;}}}}
+    </style>
+    <div class='stats-pro-shell'>
+      <div class='stats-pro-hero'>
+        <div>
+          <h2>Dashboard de plantilla</h2>
+          <p>Vista ejecutiva del estado actual de {html.escape(board_team)}: ocupación de plantilla, equilibrio por líneas, scouting, objetivos prioritarios y alertas automáticas para tomar decisiones rápidas.</p>
+          <div class='stats-pro-chip-row'>
+            <span class='stats-pro-chip'>Huecos libres · {open_slots}</span>
+            <span class='stats-pro-chip'>Estado wildcard · {html.escape(wildcard_status)}</span>
+            {wildcard_html}
+          </div>
+        </div>
+      </div>
+
+      <div class='stats-pro-grid'>
+        {''.join(stat_cards_html)}
+      </div>
+
+      <div class='stats-pro-panels'>
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Composición de plantilla</h3>
+          <div class='stats-pro-panel-sub'>Distribución actual frente al objetivo recomendado para una plantilla de 12 jugadoras.</div>
+          {''.join(composition_items)}
+          <div class='stats-pro-mini-grid' style='margin-top:18px;'>
+            {''.join(role_items)}
+          </div>
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Estado de construcción</h3>
+          <div class='stats-pro-panel-sub'>Lectura rápida por líneas para detectar carencias o exceso de perfiles.</div>
+          <div class='stats-pro-status-list'>
+            {''.join(status_items)}
+          </div>
+        </div>
+      </div>
+
+      <div class='stats-pro-triptych'>
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Producción deportiva</h3>
+          <div class='stats-pro-panel-sub'>Totales cargados en las fichas de la plantilla actual.</div>
+          <div class='stats-pro-mini-grid'>
+            {''.join(metric_boxes)}
+          </div>
+          <div class='stats-pro-chip-row' style='margin-top:18px;'>
+            {''.join(physical_badges)}
+          </div>
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Pipeline de scouting</h3>
+          <div class='stats-pro-panel-sub'>Embudo de jugadoras nuevas registradas y su estado actual de seguimiento.</div>
+          {''.join(scouting_funnel)}
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Alertas del staff</h3>
+          <div class='stats-pro-panel-sub'>Señales automáticas generadas a partir del estado actual de la plantilla y el scouting.</div>
+          <ul class='stats-pro-alerts'>
+            {alert_items}
+          </ul>
+        </div>
+      </div>
+
+      <div class='stats-pro-panels'>
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Objetivos prioritarios</h3>
+          <div class='stats-pro-panel-sub'>Top 5 de preselección ordenados por ronda y orden interno.</div>
+          <table class='stats-pro-table'>
+            <thead>
+              <tr><th>Jugadora</th><th>Posición</th><th>Prioridad</th><th>Rating</th></tr>
+            </thead>
+            <tbody>
+              {''.join(objective_table_rows)}
+            </tbody>
+          </table>
+        </div>
+
+        <div class='stats-pro-panel'>
+          <h3 class='stats-pro-panel-title'>Resumen de scouting</h3>
+          <div class='stats-pro-panel-sub'>Distribución del mercado observado por posición dentro de jugadoras nuevas.</div>
+          <div class='stats-pro-mini-grid'>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Porteras</div><div class='stats-pro-mini-value'>{scouting_positions['Portera']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Defensas</div><div class='stats-pro-mini-value'>{scouting_positions['Defensa']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Medios</div><div class='stats-pro-mini-value'>{scouting_positions['Medio']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Delanteras</div><div class='stats-pro-mini-value'>{scouting_positions['Delantera']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Top</div><div class='stats-pro-mini-value'>{scouting_status_counts['Top']}</div></div>
+            <div class='stats-pro-mini'><div class='stats-pro-mini-label'>Prioridad alta</div><div class='stats-pro-mini-value'>{scouting_priority_high}</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+    return dashboard
 
 
 def get_madam_used_legacy_teams():
@@ -1202,30 +1668,259 @@ def plantilla_estadisticas(request: Request):
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    body = (
-        "<div class='module-placeholder'>"
-        "<h2>Estadísticas</h2>"
-        "<div class='muted'>Espacio preparado para métricas deportivas, medias y evolución del equipo.</div>"
-        "</div>"
-    )
-    return plantilla_layout(request, board_team, "estadisticas", body)
+    return plantilla_layout(request, board_team, "estadisticas", render_plantilla_estadisticas(board_team))
 
 
 @app.get("/plantilla/calendario", response_class=HTMLResponse)
-def plantilla_calendario(request: Request):
+def plantilla_calendario(request: Request, ym: str = ""):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    body = (
-        "<div class='module-placeholder'>"
-        "<h2>Calendario</h2>"
-        "<div class='muted'>Página preparada para integrar partidos, entrenamientos y eventos del equipo.</div>"
-        "</div>"
-    )
+    today = date.today()
+    year = today.year
+    month = today.month
+    raw_ym = (ym or "").strip()
+    if raw_ym:
+        try:
+            parsed = datetime.strptime(raw_ym, '%Y-%m')
+            year, month = parsed.year, parsed.month
+        except ValueError:
+            pass
+    body = render_plantilla_calendar(board_team, year, month)
     return plantilla_layout(request, board_team, "calendario", body)
+
+
+@app.post("/plantilla/calendario/add")
+def plantilla_calendario_add(
+    request: Request,
+    event_date: str = Form(...),
+    event_title: str = Form(...),
+    event_type: str = Form("otro"),
+    event_time: str = Form(""),
+    description: str = Form(""),
+    ym: str = Form(""),
+):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    create_team_calendar_event(board_team, event_date, event_title, event_type, event_time, description, user.get('username', ''))
+    target = f"/plantilla/calendario?ym={ym}" if ym else "/plantilla/calendario"
+    return RedirectResponse(target, status_code=303)
+
+
+@app.post("/plantilla/calendario/delete")
+def plantilla_calendario_delete(request: Request, event_id: int = Form(...), ym: str = Form("")):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    delete_team_calendar_event(board_team, event_id)
+    target = f"/plantilla/calendario?ym={ym}" if ym else "/plantilla/calendario"
+    return RedirectResponse(target, status_code=303)
+
+
+
+def get_team_calendar_events(board_team: str, year: int, month: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, event_date, COALESCE(event_title, ''), COALESCE(event_type, 'otro'),
+               COALESCE(event_time, ''), COALESCE(description, ''), COALESCE(created_by, '')
+        FROM team_calendar_events
+        WHERE board_team=%s
+          AND EXTRACT(YEAR FROM event_date)=%s
+          AND EXTRACT(MONTH FROM event_date)=%s
+        ORDER BY event_date ASC, NULLIF(event_time, '') ASC, id ASC
+        """,
+        (board_team, year, month),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    events = []
+    for event_id, event_date, title, event_type, event_time, description, created_by in rows:
+        events.append({
+            'id': event_id,
+            'date': event_date,
+            'title': title,
+            'type': event_type or 'otro',
+            'time': event_time or '',
+            'description': description or '',
+            'created_by': created_by or '',
+        })
+    return events
+
+
+def create_team_calendar_event(board_team: str, event_date_raw: str, title: str, event_type: str, event_time: str, description: str, created_by: str):
+    title = (title or '').strip()
+    if not title or not event_date_raw:
+        return
+    allowed_types = {'entrenamiento', 'partido', 'otro'}
+    safe_type = event_type if event_type in allowed_types else 'otro'
+    safe_time = (event_time or '').strip()[:5]
+    safe_description = (description or '').strip()[:500]
+    try:
+        parsed_date = datetime.strptime(event_date_raw, '%Y-%m-%d').date()
+    except ValueError:
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO team_calendar_events (board_team, event_date, event_title, event_type, event_time, description, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        (board_team, parsed_date, title[:120], safe_type, safe_time, safe_description, (created_by or '').strip()[:120]),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def delete_team_calendar_event(board_team: str, event_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM team_calendar_events WHERE id=%s AND board_team=%s', (event_id, board_team))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def render_plantilla_calendar(board_team: str, year: int, month: int) -> str:
+    today = date.today()
+    cal = calendar.Calendar(firstweekday=0)
+    month_name = {1:'Enero',2:'Febrero',3:'Marzo',4:'Abril',5:'Mayo',6:'Junio',7:'Julio',8:'Agosto',9:'Septiembre',10:'Octubre',11:'Noviembre',12:'Diciembre'}[month]
+    events = get_team_calendar_events(board_team, year, month)
+    events_by_day = {}
+    for ev in events:
+        events_by_day.setdefault(ev['date'].day, []).append(ev)
+    prev_month = month - 1 or 12
+    prev_year = year - 1 if month == 1 else year
+    next_month = 1 if month == 12 else month + 1
+    next_year = year + 1 if month == 12 else year
+    weekday_names = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+    weekday_header = ''.join(f"<div class='calendar-weekday'>{d}</div>" for d in weekday_names)
+    day_cells = []
+    for week in cal.monthdayscalendar(year, month):
+        for day in week:
+            if day == 0:
+                day_cells.append("<div class='calendar-day empty'></div>")
+                continue
+            day_events = events_by_day.get(day, [])
+            summary = []
+            for ev in day_events[:3]:
+                time_html = f"<span class='calendar-chip-time'>{html.escape(ev['time'])}</span>" if ev['time'] else ''
+                summary.append(f"<div class='calendar-chip type-{html.escape(ev['type'])}'>{time_html}<span>{html.escape(ev['title'])}</span></div>")
+            more = ''
+            if len(day_events) > 3:
+                more = f"<div class='calendar-more'>+{len(day_events)-3} más</div>"
+            today_cls = ' today' if (year, month, day) == (today.year, today.month, today.day) else ''
+            day_cells.append(
+                f"<div class='calendar-day{today_cls}'>"
+                f"<div class='calendar-day-number'>{day}</div>"
+                f"<div class='calendar-day-events'>" + ''.join(summary) + more + "</div></div>"
+            )
+    selected_day = today.day if year == today.year and month == today.month else 1
+    selected_events = events_by_day.get(selected_day, [])
+    if not selected_events and events:
+        selected_day = events[0]['date'].day
+        selected_events = events_by_day.get(selected_day, [])
+    list_html = []
+    for ev in selected_events:
+        meta = []
+        if ev['time']:
+            meta.append(html.escape(ev['time']))
+        meta.append(html.escape(ev['type'].capitalize()))
+        if ev['created_by']:
+            meta.append('Creado por ' + html.escape(ev['created_by']))
+        desc = f"<div class='calendar-list-desc'>{html.escape(ev['description'])}</div>" if ev['description'] else ''
+        list_html.append(
+            f"<div class='calendar-list-item'>"
+            f"<div><div class='calendar-list-title'>{html.escape(ev['title'])}</div><div class='calendar-list-meta'>{' · '.join(meta)}</div>{desc}</div>"
+            f"<form action='/plantilla/calendario/delete' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar este evento?')\">"
+            f"<input type='hidden' name='event_id' value='{ev['id']}'>"
+            f"<input type='hidden' name='ym' value='{year:04d}-{month:02d}'>"
+            f"<button class='btn btn-danger' type='submit'>Eliminar</button></form>"
+            f"</div>"
+        )
+    if not list_html:
+        list_html.append("<div class='calendar-empty-list'>No hay eventos todavía en este mes para este equipo.</div>")
+    return f"""
+    <style>
+    .calendar-shell{{display:grid;grid-template-columns:minmax(0,2fr) minmax(320px,1fr);gap:22px;align-items:start;}}
+    .calendar-card{{background:#fff;border:1px solid #e5e7eb;border-radius:24px;box-shadow:0 14px 32px rgba(15,23,42,.06);padding:22px;}}
+    .calendar-topbar{{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px;}}
+    .calendar-title{{font-size:28px;font-weight:800;color:#142850;}}
+    .calendar-nav{{display:flex;gap:10px;flex-wrap:wrap;}}
+    .calendar-grid{{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;}}
+    .calendar-weekday{{text-align:center;font-weight:800;color:#64748b;padding:8px 0;}}
+    .calendar-day{{min-height:132px;border-radius:18px;border:1px solid #dbe5f4;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);padding:10px;display:flex;flex-direction:column;gap:8px;}}
+    .calendar-day.empty{{background:#f8fafc;border-style:dashed;min-height:132px;}}
+    .calendar-day.today{{border-color:#1b2f63;box-shadow:0 0 0 2px rgba(27,47,99,.08) inset;}}
+    .calendar-day-number{{font-weight:900;color:#1f3b73;font-size:16px;}}
+    .calendar-day-events{{display:flex;flex-direction:column;gap:6px;}}
+    .calendar-chip{{font-size:12px;font-weight:700;border-radius:12px;padding:6px 8px;line-height:1.2;display:flex;gap:6px;align-items:center;}}
+    .calendar-chip.type-entrenamiento{{background:#e0f2fe;color:#075985;}}
+    .calendar-chip.type-partido{{background:#dcfce7;color:#166534;}}
+    .calendar-chip.type-otro{{background:#fef3c7;color:#92400e;}}
+    .calendar-chip-time{{font-weight:900;}}
+    .calendar-more{{font-size:12px;color:#64748b;font-weight:700;}}
+    .calendar-form{{display:grid;gap:12px;}}
+    .calendar-form-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}}
+    .calendar-form input,.calendar-form select,.calendar-form textarea{{width:100%;padding:12px 14px;border-radius:14px;border:1px solid #d7deea;font:inherit;}}
+    .calendar-form textarea{{min-height:92px;resize:vertical;}}
+    .calendar-list{{display:grid;gap:12px;margin-top:18px;}}
+    .calendar-list-item{{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:16px;border-radius:18px;border:1px solid #e5e7eb;background:#f8fbff;}}
+    .calendar-list-title{{font-weight:800;color:#142850;font-size:17px;}}
+    .calendar-list-meta{{font-size:13px;color:#64748b;margin-top:4px;}}
+    .calendar-list-desc{{font-size:14px;color:#334155;margin-top:8px;white-space:pre-wrap;}}
+    .calendar-empty-list{{padding:18px;border-radius:16px;background:#f8fafc;border:1px dashed #cbd5e1;color:#64748b;font-weight:700;}}
+    @media (max-width: 1100px){{.calendar-shell{{grid-template-columns:1fr;}}}}
+    @media (max-width: 720px){{.calendar-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}.calendar-weekday{{display:none;}}.calendar-form-grid{{grid-template-columns:1fr;}}}}
+    </style>
+    <div class='calendar-shell'>
+      <div class='calendar-card'>
+        <div class='calendar-topbar'>
+          <div><div class='calendar-title'>Calendario compartido</div><div class='muted'>Visible para todo el equipo dentro de Gestión de Plantilla.</div></div>
+          <div class='calendar-nav'>
+            <a class='btn btn-secondary' href='/plantilla/calendario?ym={prev_year:04d}-{prev_month:02d}'>Mes anterior</a>
+            <a class='btn btn-secondary' href='/plantilla/calendario'>Hoy</a>
+            <a class='btn btn-secondary' href='/plantilla/calendario?ym={next_year:04d}-{next_month:02d}'>Mes siguiente</a>
+          </div>
+        </div>
+        <div style='font-size:22px;font-weight:800;color:#1f2937;margin-bottom:14px;'>{month_name} {year}</div>
+        <div class='calendar-grid'>{weekday_header}{''.join(day_cells)}</div>
+      </div>
+      <div class='calendar-card'>
+        <h2 style='margin:0 0 6px;'>Añadir evento</h2>
+        <div class='muted' style='margin-bottom:16px;'>Se guarda en base de datos y lo ve todo el equipo.</div>
+        <form class='calendar-form' action='/plantilla/calendario/add' method='post'>
+          <input type='hidden' name='ym' value='{year:04d}-{month:02d}'>
+          <div class='calendar-form-grid'>
+            <div><label>Fecha</label><input type='date' name='event_date' value='{year:04d}-{month:02d}-{selected_day:02d}' required></div>
+            <div><label>Hora</label><input type='time' name='event_time'></div>
+          </div>
+          <div><label>Título</label><input type='text' name='event_title' maxlength='120' placeholder='Entrenamiento, partido, reunión…' required></div>
+          <div><label>Tipo</label><select name='event_type'><option value='entrenamiento'>Entrenamiento</option><option value='partido'>Partido</option><option value='otro'>Otro</option></select></div>
+          <div><label>Descripción</label><textarea name='description' maxlength='500' placeholder='Detalles opcionales'></textarea></div>
+          <button class='btn btn-success' type='submit'>Guardar evento</button>
+        </form>
+        <div class='calendar-list'>
+          <div style='font-size:18px;font-weight:800;color:#1f2937;'>Eventos destacados del mes</div>
+          {''.join(list_html)}
+        </div>
+      </div>
+    </div>
+    """
 
 
 def render_board_module_body(board_team: str) -> str:
