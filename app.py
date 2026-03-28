@@ -1363,6 +1363,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         sql = f"""
             SELECT id, name, team, position, status, COALESCE(notes,'')
             FROM players
+            WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%'
             ORDER BY {sort} {order_sql}
         """
         cur.execute(sql)
