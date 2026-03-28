@@ -4,8 +4,6 @@ import io
 import html
 import hashlib
 import json
-import calendar
-from datetime import date, datetime
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
@@ -87,24 +85,6 @@ def get_conn():
             )
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS team_calendar_events (
-                id SERIAL PRIMARY KEY,
-                board_team TEXT NOT NULL,
-                event_date DATE NOT NULL,
-                event_title TEXT NOT NULL,
-                event_type TEXT NOT NULL DEFAULT 'otro',
-                event_time TEXT DEFAULT '',
-                description TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT DEFAULT ''
-            )
-            """
-        )
-        cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS event_time TEXT DEFAULT ''")
-        cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''")
-        cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''")
         conn.commit()
         cur.close()
     except Exception:
@@ -247,24 +227,6 @@ def init_db():
         )
         """
     )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS team_calendar_events (
-            id SERIAL PRIMARY KEY,
-            board_team TEXT NOT NULL,
-            event_date DATE NOT NULL,
-            event_title TEXT NOT NULL,
-            event_type TEXT NOT NULL DEFAULT 'otro',
-            event_time TEXT DEFAULT '',
-            description TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            created_by TEXT DEFAULT ''
-        )
-        """
-    )
-    cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS event_time TEXT DEFAULT ''")
-    cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''")
-    cur.execute("ALTER TABLE team_calendar_events ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT ''")
     conn.commit()
     cur.close()
     conn.close()
@@ -1250,255 +1212,20 @@ def plantilla_estadisticas(request: Request):
 
 
 @app.get("/plantilla/calendario", response_class=HTMLResponse)
-def plantilla_calendario(request: Request, ym: str = ""):
+def plantilla_calendario(request: Request):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    today = date.today()
-    year = today.year
-    month = today.month
-    raw_ym = (ym or "").strip()
-    if raw_ym:
-        try:
-            parsed = datetime.strptime(raw_ym, '%Y-%m')
-            year, month = parsed.year, parsed.month
-        except ValueError:
-            pass
-    body = render_plantilla_calendar(board_team, year, month)
+    body = (
+        "<div class='module-placeholder'>"
+        "<h2>Calendario</h2>"
+        "<div class='muted'>Página preparada para integrar partidos, entrenamientos y eventos del equipo.</div>"
+        "</div>"
+    )
     return plantilla_layout(request, board_team, "calendario", body)
-
-
-@app.post("/plantilla/calendario/add")
-def plantilla_calendario_add(
-    request: Request,
-    event_date: str = Form(...),
-    event_title: str = Form(...),
-    event_type: str = Form("otro"),
-    event_time: str = Form(""),
-    description: str = Form(""),
-    ym: str = Form(""),
-):
-    user = require_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-    create_team_calendar_event(board_team, event_date, event_title, event_type, event_time, description, user.get('username', ''))
-    target = f"/plantilla/calendario?ym={ym}" if ym else "/plantilla/calendario"
-    return RedirectResponse(target, status_code=303)
-
-
-@app.post("/plantilla/calendario/delete")
-def plantilla_calendario_delete(request: Request, event_id: int = Form(...), ym: str = Form("")):
-    user = require_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-    delete_team_calendar_event(board_team, event_id)
-    target = f"/plantilla/calendario?ym={ym}" if ym else "/plantilla/calendario"
-    return RedirectResponse(target, status_code=303)
-
-
-
-def get_team_calendar_events(board_team: str, year: int, month: int):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, event_date, COALESCE(event_title, ''), COALESCE(event_type, 'otro'),
-               COALESCE(event_time, ''), COALESCE(description, ''), COALESCE(created_by, '')
-        FROM team_calendar_events
-        WHERE board_team=%s
-          AND EXTRACT(YEAR FROM event_date)=%s
-          AND EXTRACT(MONTH FROM event_date)=%s
-        ORDER BY event_date ASC, NULLIF(event_time, '') ASC, id ASC
-        """,
-        (board_team, year, month),
-    )
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    events = []
-    for event_id, event_date, title, event_type, event_time, description, created_by in rows:
-        events.append({
-            'id': event_id,
-            'date': event_date,
-            'title': title,
-            'type': event_type or 'otro',
-            'time': event_time or '',
-            'description': description or '',
-            'created_by': created_by or '',
-        })
-    return events
-
-
-def create_team_calendar_event(board_team: str, event_date_raw: str, title: str, event_type: str, event_time: str, description: str, created_by: str):
-    title = (title or '').strip()
-    if not title or not event_date_raw:
-        return
-    allowed_types = {'entrenamiento', 'partido', 'otro'}
-    safe_type = event_type if event_type in allowed_types else 'otro'
-    safe_time = (event_time or '').strip()[:5]
-    safe_description = (description or '').strip()[:500]
-    try:
-        parsed_date = datetime.strptime(event_date_raw, '%Y-%m-%d').date()
-    except ValueError:
-        return
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO team_calendar_events (board_team, event_date, event_title, event_type, event_time, description, created_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        (board_team, parsed_date, title[:120], safe_type, safe_time, safe_description, (created_by or '').strip()[:120]),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def delete_team_calendar_event(board_team: str, event_id: int):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute('DELETE FROM team_calendar_events WHERE id=%s AND board_team=%s', (event_id, board_team))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def render_plantilla_calendar(board_team: str, year: int, month: int) -> str:
-    today = date.today()
-    cal = calendar.Calendar(firstweekday=0)
-    month_name = {1:'Enero',2:'Febrero',3:'Marzo',4:'Abril',5:'Mayo',6:'Junio',7:'Julio',8:'Agosto',9:'Septiembre',10:'Octubre',11:'Noviembre',12:'Diciembre'}[month]
-    events = get_team_calendar_events(board_team, year, month)
-    events_by_day = {}
-    for ev in events:
-        events_by_day.setdefault(ev['date'].day, []).append(ev)
-    prev_month = month - 1 or 12
-    prev_year = year - 1 if month == 1 else year
-    next_month = 1 if month == 12 else month + 1
-    next_year = year + 1 if month == 12 else year
-    weekday_names = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
-    weekday_header = ''.join(f"<div class='calendar-weekday'>{d}</div>" for d in weekday_names)
-    day_cells = []
-    for week in cal.monthdayscalendar(year, month):
-        for day in week:
-            if day == 0:
-                day_cells.append("<div class='calendar-day empty'></div>")
-                continue
-            day_events = events_by_day.get(day, [])
-            summary = []
-            for ev in day_events[:3]:
-                time_html = f"<span class='calendar-chip-time'>{html.escape(ev['time'])}</span>" if ev['time'] else ''
-                summary.append(f"<div class='calendar-chip type-{html.escape(ev['type'])}'>{time_html}<span>{html.escape(ev['title'])}</span></div>")
-            more = ''
-            if len(day_events) > 3:
-                more = f"<div class='calendar-more'>+{len(day_events)-3} más</div>"
-            today_cls = ' today' if (year, month, day) == (today.year, today.month, today.day) else ''
-            day_cells.append(
-                f"<div class='calendar-day{today_cls}'>"
-                f"<div class='calendar-day-number'>{day}</div>"
-                f"<div class='calendar-day-events'>" + ''.join(summary) + more + "</div></div>"
-            )
-    selected_day = today.day if year == today.year and month == today.month else 1
-    selected_events = events_by_day.get(selected_day, [])
-    if not selected_events and events:
-        selected_day = events[0]['date'].day
-        selected_events = events_by_day.get(selected_day, [])
-    list_html = []
-    for ev in selected_events:
-        meta = []
-        if ev['time']:
-            meta.append(html.escape(ev['time']))
-        meta.append(html.escape(ev['type'].capitalize()))
-        if ev['created_by']:
-            meta.append('Creado por ' + html.escape(ev['created_by']))
-        desc = f"<div class='calendar-list-desc'>{html.escape(ev['description'])}</div>" if ev['description'] else ''
-        list_html.append(
-            f"<div class='calendar-list-item'>"
-            f"<div><div class='calendar-list-title'>{html.escape(ev['title'])}</div><div class='calendar-list-meta'>{' · '.join(meta)}</div>{desc}</div>"
-            f"<form action='/plantilla/calendario/delete' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar este evento?')\">"
-            f"<input type='hidden' name='event_id' value='{ev['id']}'>"
-            f"<input type='hidden' name='ym' value='{year:04d}-{month:02d}'>"
-            f"<button class='btn btn-danger' type='submit'>Eliminar</button></form>"
-            f"</div>"
-        )
-    if not list_html:
-        list_html.append("<div class='calendar-empty-list'>No hay eventos todavía en este mes para este equipo.</div>")
-    return f"""
-    <style>
-    .calendar-shell{{display:grid;grid-template-columns:minmax(0,2fr) minmax(320px,1fr);gap:22px;align-items:start;}}
-    .calendar-card{{background:#fff;border:1px solid #e5e7eb;border-radius:24px;box-shadow:0 14px 32px rgba(15,23,42,.06);padding:22px;}}
-    .calendar-topbar{{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px;}}
-    .calendar-title{{font-size:28px;font-weight:800;color:#142850;}}
-    .calendar-nav{{display:flex;gap:10px;flex-wrap:wrap;}}
-    .calendar-grid{{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;}}
-    .calendar-weekday{{text-align:center;font-weight:800;color:#64748b;padding:8px 0;}}
-    .calendar-day{{min-height:132px;border-radius:18px;border:1px solid #dbe5f4;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);padding:10px;display:flex;flex-direction:column;gap:8px;}}
-    .calendar-day.empty{{background:#f8fafc;border-style:dashed;min-height:132px;}}
-    .calendar-day.today{{border-color:#1b2f63;box-shadow:0 0 0 2px rgba(27,47,99,.08) inset;}}
-    .calendar-day-number{{font-weight:900;color:#1f3b73;font-size:16px;}}
-    .calendar-day-events{{display:flex;flex-direction:column;gap:6px;}}
-    .calendar-chip{{font-size:12px;font-weight:700;border-radius:12px;padding:6px 8px;line-height:1.2;display:flex;gap:6px;align-items:center;}}
-    .calendar-chip.type-entrenamiento{{background:#e0f2fe;color:#075985;}}
-    .calendar-chip.type-partido{{background:#dcfce7;color:#166534;}}
-    .calendar-chip.type-otro{{background:#fef3c7;color:#92400e;}}
-    .calendar-chip-time{{font-weight:900;}}
-    .calendar-more{{font-size:12px;color:#64748b;font-weight:700;}}
-    .calendar-form{{display:grid;gap:12px;}}
-    .calendar-form-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}}
-    .calendar-form input,.calendar-form select,.calendar-form textarea{{width:100%;padding:12px 14px;border-radius:14px;border:1px solid #d7deea;font:inherit;}}
-    .calendar-form textarea{{min-height:92px;resize:vertical;}}
-    .calendar-list{{display:grid;gap:12px;margin-top:18px;}}
-    .calendar-list-item{{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:16px;border-radius:18px;border:1px solid #e5e7eb;background:#f8fbff;}}
-    .calendar-list-title{{font-weight:800;color:#142850;font-size:17px;}}
-    .calendar-list-meta{{font-size:13px;color:#64748b;margin-top:4px;}}
-    .calendar-list-desc{{font-size:14px;color:#334155;margin-top:8px;white-space:pre-wrap;}}
-    .calendar-empty-list{{padding:18px;border-radius:16px;background:#f8fafc;border:1px dashed #cbd5e1;color:#64748b;font-weight:700;}}
-    @media (max-width: 1100px){{.calendar-shell{{grid-template-columns:1fr;}}}}
-    @media (max-width: 720px){{.calendar-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}.calendar-weekday{{display:none;}}.calendar-form-grid{{grid-template-columns:1fr;}}}}
-    </style>
-    <div class='calendar-shell'>
-      <div class='calendar-card'>
-        <div class='calendar-topbar'>
-          <div><div class='calendar-title'>Calendario compartido</div><div class='muted'>Visible para todo el equipo dentro de Gestión de Plantilla.</div></div>
-          <div class='calendar-nav'>
-            <a class='btn btn-secondary' href='/plantilla/calendario?ym={prev_year:04d}-{prev_month:02d}'>Mes anterior</a>
-            <a class='btn btn-secondary' href='/plantilla/calendario'>Hoy</a>
-            <a class='btn btn-secondary' href='/plantilla/calendario?ym={next_year:04d}-{next_month:02d}'>Mes siguiente</a>
-          </div>
-        </div>
-        <div style='font-size:22px;font-weight:800;color:#1f2937;margin-bottom:14px;'>{month_name} {year}</div>
-        <div class='calendar-grid'>{weekday_header}{''.join(day_cells)}</div>
-      </div>
-      <div class='calendar-card'>
-        <h2 style='margin:0 0 6px;'>Añadir evento</h2>
-        <div class='muted' style='margin-bottom:16px;'>Se guarda en base de datos y lo ve todo el equipo.</div>
-        <form class='calendar-form' action='/plantilla/calendario/add' method='post'>
-          <input type='hidden' name='ym' value='{year:04d}-{month:02d}'>
-          <div class='calendar-form-grid'>
-            <div><label>Fecha</label><input type='date' name='event_date' value='{year:04d}-{month:02d}-{selected_day:02d}' required></div>
-            <div><label>Hora</label><input type='time' name='event_time'></div>
-          </div>
-          <div><label>Título</label><input type='text' name='event_title' maxlength='120' placeholder='Entrenamiento, partido, reunión…' required></div>
-          <div><label>Tipo</label><select name='event_type'><option value='entrenamiento'>Entrenamiento</option><option value='partido'>Partido</option><option value='otro'>Otro</option></select></div>
-          <div><label>Descripción</label><textarea name='description' maxlength='500' placeholder='Detalles opcionales'></textarea></div>
-          <button class='btn btn-success' type='submit'>Guardar evento</button>
-        </form>
-        <div class='calendar-list'>
-          <div style='font-size:18px;font-weight:800;color:#1f2937;'>Eventos destacados del mes</div>
-          {''.join(list_html)}
-        </div>
-      </div>
-    </div>
-    """
 
 
 def render_board_module_body(board_team: str) -> str:
@@ -1681,6 +1408,13 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     conn.close()
 
     total, objetivos, elegidas, otros = get_stats(board_team)
+    if tab == "newplayers":
+        conn_stats = get_conn()
+        cur_stats = conn_stats.cursor()
+        cur_stats.execute("SELECT COUNT(*) FROM new_players")
+        total = cur_stats.fetchone()[0]
+        cur_stats.close()
+        conn_stats.close()
     wildcard_name = get_wildcard(board_team)
     team_counts = get_team_counts(board_team)
 
@@ -2064,7 +1798,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab == "newplayers":
         add_box = (
-            "<div class='grid grid-2'>"
             "<div class='card'><h2>Jugadoras nuevas</h2>"
             "<form action='/new-player/add' method='post'>"
             "<div class='grid'>"
@@ -2079,13 +1812,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             "<div style='margin-top:12px;'><label>Observaciones</label><textarea name='notes'></textarea></div>"
             "<div style='margin-top:16px;'><button type='submit'>Añadir jugadora nueva</button></div>"
             "</form></div>"
-            "<div class='card'><h2>Importar CSV</h2>"
-            "<form action='/new-players/import' method='post' enctype='multipart/form-data'>"
-            "<label>Archivo CSV</label><input type='file' name='file' accept='.csv,text/csv' required>"
-            "<div class='muted' style='margin-top:10px;'>Importa solo en Jugadoras nuevas. Columnas admitidas: dorsal, name, position, club, estimated_level, fit_level, scout_status y notes.</div>"
-            "<div style='margin-top:16px;'><button type='submit'>Importar CSV</button></div>"
-            "</form></div>"
-            "</div>"
         )
 
 
@@ -3240,82 +2966,6 @@ def add_new_player(request: Request, dorsal: str = Form(""), name: str = Form(..
     conn.commit()
     cur.close()
     conn.close()
-    return RedirectResponse("/?tab=newplayers", status_code=303)
-
-
-@app.post("/new-players/import")
-async def import_new_players_csv(request: Request, file: UploadFile = File(...)):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-
-    filename = (file.filename or "").lower()
-    if not filename.endswith(".csv"):
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    raw = await file.read()
-    if not raw:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    text_content = None
-    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            text_content = raw.decode(encoding)
-            break
-        except Exception:
-            pass
-    if text_content is None:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    reader = csv.DictReader(io.StringIO(text_content))
-    if not reader.fieldnames:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    def norm(value: str) -> str:
-        return (value or "").strip().lower().replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u").replace("ñ", "n").replace(" ", "_")
-
-    aliases = {norm(name): name for name in reader.fieldnames if name is not None}
-
-    def pick(row: dict, *names: str) -> str:
-        for candidate in names:
-            real_key = aliases.get(norm(candidate))
-            if real_key and real_key in row and row[real_key] is not None:
-                return str(row[real_key]).strip()
-        return ""
-
-    rows_to_insert = []
-    for row in reader:
-        name = pick(row, "name", "nombre", "nombre_y_apellidos", "jugadora")
-        if not name:
-            continue
-        rows_to_insert.append((
-            pick(row, "dorsal", "numero"),
-            name,
-            pick(row, "position", "posicion"),
-            pick(row, "club", "procedencia", "equipo_actual"),
-            pick(row, "estimated_level", "nivel_estimado", "nivel"),
-            pick(row, "fit_level", "encaje"),
-            pick(row, "scout_status", "estado", "estado_scouting") or "Seguimiento",
-            pick(row, "notes", "observaciones", "notas"),
-        ))
-
-    if not rows_to_insert:
-        return RedirectResponse("/?tab=newplayers", status_code=303)
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.executemany(
-            "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            rows_to_insert
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        cur.close()
-        conn.close()
-
     return RedirectResponse("/?tab=newplayers", status_code=303)
 
 
