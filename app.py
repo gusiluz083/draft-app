@@ -994,7 +994,7 @@ def select_module_page(request: Request):
                     <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#eef3ff;font-size:28px;margin-bottom:18px;'>📋</div>
                     <h2 style='margin:0 0 12px;font-size:28px;'>Gestión del DRAFT</h2>
                     <div class='muted' style='margin-bottom:20px;font-size:17px;line-height:1.55;'>
-                        Acceso a jugadoras, jugadoras nuevas, preselección, plantilla, Draft Day y Pizarra.
+                        Acceso a jugadoras, jugadoras nuevas, preselección, plantilla, Draft Day y acceso a Gestión de Plantilla.
                     </div>
                     <a class='btn' style='display:inline-block;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700;' href='/'>Acceder a Gestión del DRAFT</a>
                 </div>
@@ -1018,6 +1018,7 @@ def select_module_page(request: Request):
 def plantilla_module_nav(active: str) -> str:
     items = [
         ("plantilla", "Plantilla", "/plantilla"),
+        ("pizarra", "Pizarra", "/plantilla/pizarra"),
         ("estadisticas", "Estadísticas", "/plantilla/estadisticas"),
         ("calendario", "Calendario", "/plantilla/calendario"),
         ("resultados", "Resultados", "/plantilla/resultados"),
@@ -1139,7 +1140,7 @@ def plantilla_layout(request: Request, board_team: str, active: str, body: str) 
     .module-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:22px;}
     .module-hero h1{margin:0;font-size:34px;color:#142850;}
     .module-actions{display:flex;gap:10px;flex-wrap:wrap;}
-    .module-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0 24px;}
+    .module-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:18px 0 24px;}
     .module-tab{display:flex;align-items:center;justify-content:center;padding:18px 14px;border-radius:18px;text-decoration:none;font-weight:800;font-size:18px;color:#1f3b73;background:linear-gradient(180deg,#eef4ff 0%,#e1ebff 100%);border:1px solid #d5e2ff;box-shadow:0 10px 24px rgba(31,59,115,0.08);transition:all .2s ease;}
     .module-tab:hover{transform:translateY(-2px);box-shadow:0 14px 28px rgba(31,59,115,0.14);}
     .module-tab.active{background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;border-color:#1b2f63;box-shadow:0 16px 32px rgba(27,47,99,0.28);}
@@ -1225,6 +1226,92 @@ def plantilla_calendario(request: Request):
         "</div>"
     )
     return plantilla_layout(request, board_team, "calendario", body)
+
+
+def render_board_module_body(board_team: str) -> str:
+    board_state, board_updated_at, board_updated_by = get_team_board_state(board_team)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT player_id, p.name, COALESCE(p.position,'') FROM team_player_decisions d JOIN players p ON p.id=d.player_id WHERE d.board_team=%s AND d.status='Elegida' ORDER BY p.name ASC", (board_team,))
+    final_players = cur.fetchall()
+    cur.execute("SELECT player_id, p.name, COALESCE(p.position,'') FROM team_player_decisions d JOIN players p ON p.id=d.player_id WHERE d.board_team=%s AND d.status='Objetivo' ORDER BY COALESCE(d.round_order,999), p.name ASC", (board_team,))
+    objective_players = cur.fetchall()
+    cur.execute("SELECT id, name, COALESCE(position,'') FROM new_players ORDER BY name ASC")
+    new_board_players = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    def _board_source(items, prefix):
+        return [{"id": f"{prefix}-{pid}", "name": name or "", "position": position or ""} for pid, name, position in items]
+
+    board_available = json.dumps(
+        {
+            "final": _board_source(final_players, "final"),
+            "objectives": _board_source(objective_players, "objective"),
+            "newplayers": _board_source(new_board_players, "new"),
+        },
+        ensure_ascii=False,
+    )
+    state_json = html.escape(json.dumps(board_state, ensure_ascii=False))
+    updated_text = board_updated_at.strftime("%d/%m/%Y %H:%M") if board_updated_at else "Sin guardar todavía"
+    updated_by_text = html.escape(board_updated_by or "—")
+    script = """<script>
+(function(){
+ const pitch=document.getElementById('boardPitch');
+ const input=document.getElementById('boardStateInput');
+ const side=document.getElementById('boardSideList');
+ const available=JSON.parse(document.getElementById('boardAvailableData').textContent);
+ let state=[];
+ try{state=JSON.parse(input.value||'[]'); if(!Array.isArray(state)) state=[];}catch(e){state=[];}
+ function esc(v){return String(v||'').replace(/[&<>\"']/g,function(s){return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'})[s];});}
+ function save(){input.value=JSON.stringify(state);}
+ function renderSide(){
+   if(!state.length){side.innerHTML="<div class='board-empty'>No hay jugadoras en la pizarra.</div>"; return;}
+   side.innerHTML=state.map((p,i)=>`<div class=\"board-side-item\"><div><strong>${esc(p.name||'Sin nombre')}</strong><span class=\"mini-meta\">${Math.round(p.x)}% / ${Math.round(p.y)}%</span></div><button type=\"button\" class=\"btn btn-danger action-btn\" data-remove=\"${i}\">Quitar</button></div>`).join('');
+   side.querySelectorAll('[data-remove]').forEach(btn=>btn.addEventListener('click',()=>{state.splice(Number(btn.dataset.remove),1); render();}));
+ }
+ function wire(el,p){
+   const inp=el.querySelector('input');
+   inp.addEventListener('input',()=>{p.name=inp.value.slice(0,80); save(); renderSide();});
+   let dragging=false;
+   function moveAt(x,y){const r=pitch.getBoundingClientRect(); p.x=Math.max(2,Math.min(98,((x-r.left)/r.width)*100)); p.y=Math.max(2,Math.min(98,((y-r.top)/r.height)*100)); el.style.left=p.x+'%'; el.style.top=p.y+'%'; save(); renderSide();}
+   el.addEventListener('pointerdown',e=>{if(e.target.tagName==='INPUT') return; dragging=true; el.classList.add('dragging'); el.setPointerCapture(e.pointerId); e.preventDefault();});
+   el.addEventListener('pointermove',e=>{if(dragging) moveAt(e.clientX,e.clientY);});
+   el.addEventListener('pointerup',()=>{dragging=false; el.classList.remove('dragging');});
+   el.addEventListener('pointercancel',()=>{dragging=false; el.classList.remove('dragging');});
+ }
+ function render(){
+   pitch.innerHTML='';
+   state.forEach((p,i)=>{const el=document.createElement('div'); el.className='board-player'; el.style.left=(p.x||50)+'%'; el.style.top=(p.y||50)+'%'; el.innerHTML=`<div class=\"board-player-dot\">${i+1}</div><input value=\"${esc(p.name||'')}\" maxlength=\"80\">`; pitch.appendChild(el); wire(el,p);});
+   save(); renderSide();
+ }
+ window.addBoardPlayer=function(name){state.push({id:'manual-'+Date.now()+Math.random().toString(36).slice(2,7), name:name||'', x:50, y:50}); render();};
+ window.clearBoardPlayers=function(){state=[]; render();};
+ function renderSources(id, items){const box=document.getElementById(id); if(!items.length){box.innerHTML='<div class="board-empty">Sin jugadoras disponibles.</div>'; return;} box.innerHTML=items.map(item=>`<div class="board-source-item"><div><strong>${esc(item.name)}</strong><span class="mini-meta">${esc(item.position||'')}</span></div><button type="button" class="btn btn-secondary action-btn" data-name="${esc(item.name)}">Añadir</button></div>`).join(''); box.querySelectorAll('[data-name]').forEach(btn=>btn.addEventListener('click',()=>{window.addBoardPlayer(btn.dataset.name || '');}));}
+ renderSources('boardSourceFinal', available.final || []);
+ renderSources('boardSourceObjectives', available.objectives || []);
+ renderSources('boardSourceNew', available.newplayers || []);
+ render();
+})();
+</script>"""
+    return (
+        f"<div class='card'><strong>Pizarra compartida del equipo</strong><br><span class='muted'>Última actualización: {updated_text}</span><br><span class='muted'>Guardado por: {updated_by_text}</span></div>"
+        f"<div class='card board-card'><h2>Pizarra</h2><div class='muted' style='margin-bottom:12px;'>Libre, con nombres editables y guardado por equipo.</div>"
+        f"<form action='/board/save' method='post'><input type='hidden' name='redirect_to' value='/plantilla/pizarra'><input type='hidden' id='boardStateInput' name='board_state' value='{state_json}'><script id='boardAvailableData' type='application/json'>{board_available}</script>"
+        f"<div class='board-shell'><div><div class='board-toolbar'><button type='button' class='btn' id='addBoardPlayer'>Añadir jugadora</button><button type='button' class='btn btn-secondary' id='clearBoardPlayers'>Vaciar pizarra</button><button type='submit' class='btn btn-success'>Guardar pizarra</button></div><div class='board-pitch-wrap'><div class='board-pitch' id='boardPitch'></div></div></div><div class='card' style='margin-bottom:0;'><h3 style='margin-bottom:12px;'>Jugadoras en pizarra</h3><div id='boardSideList' class='board-side-list'></div><div id='boardSources'></div></div></div></form></div>"
+        f"{script}"
+    )
+
+
+@app.get("/plantilla/pizarra", response_class=HTMLResponse)
+def plantilla_pizarra(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    return plantilla_layout(request, board_team, "pizarra", render_board_module_body(board_team))
 
 
 @app.get("/plantilla/resultados", response_class=HTMLResponse)
@@ -1322,6 +1409,13 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     conn.close()
 
     total, objetivos, elegidas, otros = get_stats(board_team)
+    if tab == "newplayers":
+        conn_stats = get_conn()
+        cur_stats = conn_stats.cursor()
+        cur_stats.execute("SELECT COUNT(*) FROM new_players")
+        total = cur_stats.fetchone()[0]
+        cur_stats.close()
+        conn_stats.close()
     wildcard_name = get_wildcard(board_team)
     team_counts = get_team_counts(board_team)
 
@@ -1748,7 +1842,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
         f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
@@ -1764,6 +1858,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         return page(content)
 
     if tab == "board":
+        return RedirectResponse("/plantilla/pizarra", status_code=303)
+
         board_state, board_updated_at, board_updated_by = get_team_board_state(board_team)
         conn = get_conn()
         cur = conn.cursor()
@@ -1824,7 +1920,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 </script>"""
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='card'><strong>Pizarra compartida del equipo</strong><br><span class='muted'>Última actualización: {updated_text}</span><br><span class='muted'>Guardado por: {updated_by_text}</span></div>"
@@ -1840,7 +1936,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/?tab=board'>Pizarra</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
         
@@ -1856,7 +1952,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
 
 @app.post("/board/save")
-def board_save(request: Request, board_state: str = Form("[]")):
+def board_save(request: Request, board_state: str = Form("[]"), redirect_to: str = Form("/plantilla/pizarra")):
     user = require_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -1868,7 +1964,8 @@ def board_save(request: Request, board_state: str = Form("[]")):
     except Exception:
         data = []
     save_team_board_state(board_team, data, user.get("username", ""))
-    return RedirectResponse("/?tab=board", status_code=303)
+    target = redirect_to if isinstance(redirect_to, str) and redirect_to.startswith("/") else "/plantilla/pizarra"
+    return RedirectResponse(target, status_code=303)
 
 
 @app.post("/users/create")
@@ -2794,7 +2891,7 @@ def export_excel(request: Request, tab: str = "database"):
     conn = get_conn()
     cur = conn.cursor()
     if tab == "database":
-        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%' ORDER BY id DESC")
+        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players ORDER BY id DESC")
         rows = cur.fetchall()
         headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
     else:
