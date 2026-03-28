@@ -657,7 +657,7 @@ def save_team_board_state(board_team: str, data, updated_by: str = ''):
 def get_stats(board_team: str):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM players")
+    cur.execute("SELECT COUNT(*) FROM players WHERE COALESCE(notes, '') NOT LIKE '%[ORIGEN:NUEVA]%'")
     total = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM team_player_decisions WHERE board_team=%s AND status='Objetivo'", (board_team,))
     objetivos = cur.fetchone()[0]
@@ -1363,6 +1363,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         sql = f"""
             SELECT id, name, team, position, status, COALESCE(notes,'')
             FROM players
+            WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%'
             ORDER BY {sort} {order_sql}
         """
         cur.execute(sql)
@@ -1408,18 +1409,13 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     conn.close()
 
     total, objetivos, elegidas, otros = get_stats(board_team)
-    stats_label_1 = "Total jugadoras"
-    stats_value_1 = total
     if tab == "newplayers":
         conn_stats = get_conn()
         cur_stats = conn_stats.cursor()
         cur_stats.execute("SELECT COUNT(*) FROM new_players")
-        stats_value_1 = cur_stats.fetchone()[0]
+        total = cur_stats.fetchone()[0]
         cur_stats.close()
         conn_stats.close()
-    elif tab == "objectives":
-        stats_label_1 = "Preseleccionadas"
-        stats_value_1 = objetivos
     wildcard_name = get_wildcard(board_team)
     team_counts = get_team_counts(board_team)
 
@@ -1847,7 +1843,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
             f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
-                f"{admin_box}"
+            f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
+            f"{admin_box}"
         f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
             f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
             
@@ -2894,7 +2891,7 @@ def export_excel(request: Request, tab: str = "database"):
     conn = get_conn()
     cur = conn.cursor()
     if tab == "database":
-        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players ORDER BY id DESC")
+        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%' ORDER BY id DESC")
         rows = cur.fetchall()
         headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
     else:
