@@ -86,7 +86,7 @@ def get_conn():
             )
             """
         )
-        cur.execute("ALTER TABLE team_draftday_state ADD COLUMN IF NOT EXISTS round_names_json TEXT DEFAULT '{}'")
+        cur.execute("ALTER TABLE team_draftday_state ADD COLUMN IF NOT EXISTS round_names_json TEXT DEFAULT '{}' ")
         conn.commit()
         cur.close()
     except Exception:
@@ -180,7 +180,7 @@ def init_db():
         )
         """
     )
-    cur.execute("ALTER TABLE team_draftday_state ADD COLUMN IF NOT EXISTS round_names_json TEXT DEFAULT '{}'")
+    cur.execute("ALTER TABLE team_draftday_state ADD COLUMN IF NOT EXISTS round_names_json TEXT DEFAULT '{}' ")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS team_board_state (
@@ -747,18 +747,16 @@ def get_draftday_state(board_team: str):
     row = cur.fetchone()
     cur.close()
     conn.close()
-    round_names = {}
-    if row and row[3]:
+    if row:
+        round_names = {}
         try:
-            loaded = json.loads(row[3])
-            if isinstance(loaded, dict):
-                round_names = {str(k): str(v or '').strip() for k, v in loaded.items()}
+            parsed = json.loads(row[3] or '{}')
+            if isinstance(parsed, dict):
+                round_names = {str(k): str(v or '').strip() for k, v in parsed.items()}
         except Exception:
             round_names = {}
-    if row:
         return {"current_round": row[0] or 1, "current_pick": row[1], "next_pick": row[2], "round_names": round_names}
     return {"current_round": 1, "current_pick": None, "next_pick": None, "round_names": {}}
-
 
 def get_blocked_players(board_team: str, current_round: int):
     conn = get_conn()
@@ -1357,66 +1355,50 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         tab = "database"
 
     if tab == "database":
-        allowed_sort = ["id", "name", "team", "position", "status"]
-    elif tab == "newplayers":
-        allowed_sort = ["id", "name", "position", "status"]
-    elif tab == "board":
-        allowed_sort = ["id"]
-    else:
-        allowed_sort = ["id", "name", "team", "position", "decision_status", "draft_round"]
-    if sort not in allowed_sort:
-        sort = "id"
-    order_sql = "ASC" if order == "asc" else "DESC"
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    if tab == "database":
-        sql = f"""
-            SELECT id, name, team, position, status, COALESCE(notes,'')
-            FROM players
-            WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%'
-            ORDER BY {sort} {order_sql}
-        """
-        cur.execute(sql)
-        players = cur.fetchall()
-    elif tab == "newplayers":
-        sql = """
-            SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
-            FROM new_players
-            ORDER BY id DESC, name ASC
-        """
-        cur.execute(sql)
-        players = cur.fetchall()
+        cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%' ORDER BY id DESC")
+        rows = cur.fetchall()
+        headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
     elif tab == "draftday":
-        current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
-        all_board_q = (request.query_params.get("all_board_q", "") or "").strip()
-        all_board_round = (request.query_params.get("all_board_round", "") or "").strip()
-        sql = """
-            SELECT p.id, p.name, p.team, p.position, p.status, COALESCE(p.notes,''), d.status, d.draft_round, d.round_order
+        draft_state = get_draftday_state(board_team)
+        current_pick = draft_state.get("current_pick")
+        next_pick = draft_state.get("next_pick")
+        picks_remaining = None
+        if current_pick is not None and next_pick is not None:
+            picks_remaining = max(next_pick - current_pick, 0)
+        cur.execute(
+            '''
+            SELECT p.name, p.team, p.position, COALESCE(d.round_order, NULL), COALESCE(p.notes,'')
             FROM team_player_decisions d
             JOIN players p ON p.id = d.player_id
-            WHERE d.board_team = %s AND d.status = 'Objetivo' AND COALESCE(d.draft_round, 0) = %s
-            ORDER BY COALESCE(d.round_order, 999) ASC, p.name ASC
-        """
-        cur.execute(sql, (board_team, current_round))
-        players = cur.fetchall()
-    elif tab == "board":
-        players = []
+            WHERE d.board_team=%s AND d.status='Objetivo' AND COALESCE(d.draft_round,0)=%s
+            ORDER BY COALESCE(d.round_order, 999), p.name ASC
+            ''',
+            (board_team, current_round),
+        )
+        raw_rows = cur.fetchall()
+        position_pressure = {}
+        for _name, _team, position, _round_order, _notes in raw_rows:
+            position_pressure[position] = position_pressure.get(position, 0) + 1
+        rows = []
+        for name, team, position, round_order, notes in raw_rows:
+            risk = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
+            rows.append((name, team, position, current_round, round_order, risk, notes))
+        headers = ["Nombre", "Equipo actual", "Posición", "Ronda", "Orden", "Riesgo", "Notas"]
     else:
         wanted = "Objetivo" if tab == "objectives" else "Elegida"
-        sort_expr = "d.status" if sort == "decision_status" else ("d.draft_round" if sort == "draft_round" else "p." + sort)
-        sql = f"""
-            SELECT p.id, p.name, p.team, p.position, p.status, COALESCE(p.notes,''), d.status, d.draft_round, d.round_order
+        cur.execute(
+            '''
+            SELECT p.name, p.team, p.position, d.status, COALESCE(d.draft_round, NULL), COALESCE(d.round_order, NULL), COALESCE(p.notes,'')
             FROM team_player_decisions d
             JOIN players p ON p.id = d.player_id
-            WHERE d.board_team = %s AND d.status = %s
-            ORDER BY {sort_expr} {order_sql}, COALESCE(d.round_order, 999) ASC, p.name ASC
-        """
-        cur.execute(sql, (board_team, wanted))
-        players = cur.fetchall()
-
+            WHERE d.board_team=%s AND d.status=%s
+            ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+            ''',
+            (board_team, wanted),
+        )
+        rows = cur.fetchall()
+        headers = ["Nombre", "Equipo actual", "Posición", "Estado", "Ronda", "Orden", "Notas"]
     cur.close()
     conn.close()
 
@@ -1518,6 +1500,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         current_round = current_round if 1 <= current_round <= 10 else 1
         current_pick = draft_state["current_pick"]
         next_pick = draft_state["next_pick"]
+        round_names = draft_state.get("round_names", {})
+        current_round_name = (round_names.get(str(current_round)) or "").strip()
         picks_remaining = None
         if current_pick is not None and next_pick is not None:
             picks_remaining = max(next_pick - current_pick, 0)
@@ -1603,7 +1587,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not blocked_rows:
             blocked_rows = "<tr><td colspan='4' class='muted'>No hay jugadoras bloqueadas en esta ronda.</td></tr>"
 
-        round_tabs = "".join([f"<a class='tab {'active' if current_round==i else ''}' href='/?tab=draftday&current_round={i}'>R{i}</a>" for i in range(1,11)])
+        round_tabs = "".join([f"<a class='tab {'active' if current_round==i else ''}' href='/?tab=draftday&current_round={i}'>R{i}{(' · ' + html.escape(round_names.get(str(i), '').strip())) if round_names.get(str(i), '').strip() else ''}</a>" for i in range(1,11)])
 
         madam_box = ""
         if is_new_team(board_team):
@@ -1616,6 +1600,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "</div>"
             )
 
+        draftday_title = f"Targets de la ronda {current_round}"
+        if current_round_name:
+            draftday_title += f" · {html.escape(current_round_name)}"
         table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
         all_board_html = (
             "<form class='allboard-toolbar' method='get' action='/'>"
@@ -1657,15 +1644,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div><label>Ronda actual</label><select name='current_round'>"
             + "".join([f"<option value='{i}' {'selected' if current_round==i else ''}>{i}</option>" for i in range(1,11)])
             + f"</select></div>"
+            f"<div><label>Nombre de la ronda</label><input name='round_name' value='{html.escape(current_round_name)}' placeholder='Ej. MEDIO, DELANTERA, PORTERA'></div>"
             f"<div><label>Pick actual</label><input name='current_pick' value='{current_pick if current_pick is not None else ''}' placeholder='Ej. 23'></div>"
             f"<div><label>Siguiente pick propio</label><input name='next_pick' value='{next_pick if next_pick is not None else ''}' placeholder='Ej. 31'></div>"
-            f"<div><button type='submit'>Guardar control draft</button></div>"
+            f"<div style='display:flex;align-items:end;gap:10px;flex-wrap:wrap;'><button type='submit'>Guardar control draft</button><a class='btn btn-light' href='/?tab=draftday&current_round={current_round}'>Ver ronda</a></div>"
             f"</div></form>"
-            f"<form action='/draftday-round-name' method='post' class='grid' style='margin-top:12px;'>"
-            f"<input type='hidden' name='current_round' value='{current_round}'>"
-            f"<div><label>Nombre de la ronda {current_round}</label><input name='round_name' value='{html.escape(round_names.get(str(current_round), ''))}' placeholder='Ej. MEDIO'></div>"
-            f"<div style='display:flex;align-items:end;gap:10px;flex-wrap:wrap;'><button type='submit'>Guardar nombre ronda</button><a class='btn btn-secondary' href='/export?tab=draftday&round={current_round}'>Exportar Excel R{current_round}</a></div>"
-            f"</form>"
             f"</div>"
             f"<div class='stats'>"
             f"<div class='stat'><div class='muted'>Ronda actual</div><div class='stat-number'>{current_round}</div></div>"
@@ -1675,7 +1658,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</div>"
             f"<div class='tabs'>{round_tabs}</div>"
             f"<div class='draftday-grid'>"
-            f"<div><div class='card'><h2>Targets de la ronda {current_round}{(' · ' + html.escape(round_names.get(str(current_round), ''))) if round_names.get(str(current_round), '').strip() else ''}</h2><div class='table-wrap'>{table_html}</div></div>"
+            f"<div><div class='card'><div style='display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;'><h2 style='margin:0;'>{draftday_title}</h2><a class='btn btn-light' href='/export?tab=draftday&current_round={current_round}'>Exportar Excel R{current_round}</a></div><div class='table-wrap' style='margin-top:12px;'>{table_html}</div></div>"
             f"<details class='card' style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>Control global de todas las rondas (mostrar / ocultar)</summary><div style='margin-top:10px;'><div class='muted'>Usa este filtro para localizar cualquier jugadora de cualquier ronda y marcarla rápidamente como fichada por otro equipo.</div><div class='table-wrap' style='margin-top:10px;'>{all_board_html}</div></div></details>"
             f"<div>"
             f"<div class='card'><h2>Composición actual</h2>"
@@ -2223,6 +2206,7 @@ def save_draftday_state(
     current_round: str = Form("1"),
     current_pick: str = Form(""),
     next_pick: str = Form(""),
+    round_name: str = Form(""),
 ):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
@@ -2233,47 +2217,7 @@ def save_draftday_state(
     round_value = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
     current_pick_value = int(current_pick) if str(current_pick).isdigit() else None
     next_pick_value = int(next_pick) if str(next_pick).isdigit() else None
-
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT id, COALESCE(round_names_json,'{}') FROM team_draftday_state WHERE board_team=%s", (board_team,))
-        row = cur.fetchone()
-        existing_round_names_json = row[1] if row and len(row) > 1 else '{}'
-        if row:
-            cur.execute(
-                "UPDATE team_draftday_state SET current_round=%s, current_pick=%s, next_pick=%s, round_names_json=%s WHERE board_team=%s",
-                (round_value, current_pick_value, next_pick_value, existing_round_names_json, board_team),
-            )
-        else:
-            cur.execute(
-                "INSERT INTO team_draftday_state (board_team, current_round, current_pick, next_pick, round_names_json) VALUES (%s,%s,%s,%s,%s)",
-                (board_team, round_value, current_pick_value, next_pick_value, '{}'),
-            )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
-
-    return RedirectResponse(f"/?tab=draftday&current_round={round_value}", status_code=303)
-
-
-@app.post("/draftday-round-name")
-def save_draftday_round_name(
-    request: Request,
-    current_round: str = Form("1"),
-    round_name: str = Form(""),
-):
-    if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
-    board_team = get_team(request)
-    if not board_team:
-        return RedirectResponse("/select-team", status_code=303)
-
-    round_value = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
-    clean_name = str(round_name or "").strip()
+    round_name_value = (round_name or "").strip()
 
     conn = get_conn()
     cur = conn.cursor()
@@ -2283,26 +2227,25 @@ def save_draftday_round_name(
         round_names = {}
         if row and row[1]:
             try:
-                loaded = json.loads(row[1])
-                if isinstance(loaded, dict):
-                    round_names = {str(k): str(v or '').strip() for k, v in loaded.items()}
+                parsed = json.loads(row[1] or '{}')
+                if isinstance(parsed, dict):
+                    round_names = {str(k): str(v or '').strip() for k, v in parsed.items()}
             except Exception:
                 round_names = {}
-        if clean_name:
-            round_names[str(round_value)] = clean_name
+        if round_name_value:
+            round_names[str(round_value)] = round_name_value
         else:
             round_names.pop(str(round_value), None)
         round_names_json = json.dumps(round_names, ensure_ascii=False)
-
         if row:
             cur.execute(
-                "UPDATE team_draftday_state SET round_names_json=%s WHERE board_team=%s",
-                (round_names_json, board_team),
+                "UPDATE team_draftday_state SET current_round=%s, current_pick=%s, next_pick=%s, round_names_json=%s WHERE board_team=%s",
+                (round_value, current_pick_value, next_pick_value, round_names_json, board_team),
             )
         else:
             cur.execute(
                 "INSERT INTO team_draftday_state (board_team, current_round, current_pick, next_pick, round_names_json) VALUES (%s,%s,%s,%s,%s)",
-                (board_team, round_value, None, None, round_names_json),
+                (board_team, round_value, current_pick_value, next_pick_value, round_names_json),
             )
         conn.commit()
     except Exception:
@@ -2953,7 +2896,7 @@ def import_csv(request: Request, file: UploadFile = File(...)):
 
 
 @app.get("/export")
-def export_excel(request: Request, tab: str = "database", round: str = ""):
+def export_excel(request: Request, tab: str = "database", current_round: str = "1"):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
@@ -2967,21 +2910,32 @@ def export_excel(request: Request, tab: str = "database", round: str = ""):
         rows = cur.fetchall()
         headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
     elif tab == "draftday":
-        round_value = int(round) if str(round).isdigit() and 1 <= int(round) <= 10 else 1
-        state = get_draftday_state(board_team)
-        round_name = (state.get("round_names", {}) or {}).get(str(round_value), "")
+        current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
+        draft_state = get_draftday_state(board_team)
+        current_pick = draft_state.get("current_pick")
+        next_pick = draft_state.get("next_pick")
+        picks_remaining = None
+        if current_pick is not None and next_pick is not None:
+            picks_remaining = max(next_pick - current_pick, 0)
         cur.execute(
             '''
-            SELECT p.name, p.team, p.position, d.status, COALESCE(d.round_order, NULL), COALESCE(p.notes,'')
+            SELECT p.name, p.team, p.position, COALESCE(d.round_order, NULL), COALESCE(p.notes,'')
             FROM team_player_decisions d
             JOIN players p ON p.id = d.player_id
-            WHERE d.board_team=%s AND d.status='Objetivo' AND COALESCE(d.draft_round, 0)=%s
+            WHERE d.board_team=%s AND d.status='Objetivo' AND COALESCE(d.draft_round,0)=%s
             ORDER BY COALESCE(d.round_order, 999), p.name ASC
             ''',
-            (board_team, round_value),
+            (board_team, current_round),
         )
-        rows = [(r[0], r[1], r[2], r[3], round_value, round_name, r[4], r[5]) for r in cur.fetchall()]
-        headers = ["Nombre", "Equipo actual", "Posición", "Estado", "Ronda", "Nombre ronda", "Orden", "Notas"]
+        raw_rows = cur.fetchall()
+        position_pressure = {}
+        for _name, _team, position, _round_order, _notes in raw_rows:
+            position_pressure[position] = position_pressure.get(position, 0) + 1
+        rows = []
+        for name, team, position, round_order, notes in raw_rows:
+            risk = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
+            rows.append((name, team, position, current_round, round_order, risk, notes))
+        headers = ["Nombre", "Equipo actual", "Posición", "Ronda", "Orden", "Riesgo", "Notas"]
     else:
         wanted = "Objetivo" if tab == "objectives" else "Elegida"
         cur.execute(
@@ -3015,7 +2969,7 @@ def export_excel(request: Request, tab: str = "database", round: str = ""):
     return StreamingResponse(
         stream,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={board_team.lower()}_{tab}{("_r" + str(round)) if tab == "draftday" and str(round).isdigit() else ""}.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={board_team.lower()}_{tab}{('_r' + str(current_round)) if tab == 'draftday' else ''}.xlsx"},
     )
 
 
