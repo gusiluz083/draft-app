@@ -421,6 +421,31 @@ function refreshDraftdayEmptyState(){
  }
  if(liveRows.length>0 && empty) empty.remove();
 }
+
+document.addEventListener('submit', async (e) => {
+ const form = e.target;
+ if(!form || !form.classList || !form.classList.contains('draftday-ajax-form')) return;
+ e.preventDefault();
+ const btn = document.activeElement && form.contains(document.activeElement) ? document.activeElement : form.querySelector('button[type="submit"]');
+ const original = btn ? btn.textContent : '';
+ if(btn){ btn.disabled = true; btn.textContent = '...'; }
+ try {
+   const fd = new FormData(form);
+   fd.set('ajax','1');
+   const res = await fetch(form.action, {method:'POST', body: fd, credentials:'same-origin'});
+   if(!res.ok) throw new Error('HTTP '+res.status);
+   const data = await res.json();
+   updateDraftdayUi(data);
+   const row = form.closest('tr');
+   if(row && (row.getAttribute('data-draftday-row') === '1' || row.getAttribute('data-all-board-row') === '1')) row.remove();
+   refreshDraftdayEmptyState();
+ } catch(err){
+   window.location.href = form.getAttribute('data-fallback-href') || window.location.href;
+ } finally {
+   if(btn){ btn.disabled = false; btn.textContent = original || 'OK'; }
+ }
+});
+
 document.addEventListener('DOMContentLoaded',()=>{
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
@@ -1540,23 +1565,27 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
             actions_html = (
                 f"<div class='draftday-actions'>"
-                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'>"
+                f"<form class='inline-form draftday-ajax-form' action='/decision/{pid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
                 f"<input type='hidden' name='status' value='Elegida'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+                f"<input type='hidden' name='ajax' value='1'>"
                 f"<button class='btn-success action-btn' type='submit'>Firmada</button></form>"
-                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'>"
+                f"<form class='inline-form draftday-ajax-form' action='/decision/{pid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
                 f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+                f"<input type='hidden' name='ajax' value='1'>"
                 f"<button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
-                f"<form class='inline-form' action='/decision/{pid}?current_round={current_round}' method='post'>"
+                f"<form class='inline-form draftday-ajax-form' action='/decision/{pid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
                 f"<input type='hidden' name='status' value='Descartada'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+                f"<input type='hidden' name='ajax' value='1'>"
                 f"<button class='btn-danger action-btn' type='submit'>Descartada</button></form>"
-                f"<form class='inline-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post'>"
+                f"<form class='inline-form draftday-ajax-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+                f"<input type='hidden' name='ajax' value='1'>"
                 f"<button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
                 f"</div>"
             )
@@ -1584,10 +1613,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<td>{html.escape(around_text)}</td>"
                 f"<td>{html.escape(str(around_order or ''))}</td>"
                 f"<td>{html.escape(apos_short)}</td>"
-                f"<td><form class='inline-form' action='/decision/{apid}?current_round={current_round}' method='post'>"
+                f"<td><form class='inline-form draftday-ajax-form' action='/decision/{apid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
                 f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
                 f"<input type='hidden' name='source_tab' value='draftday'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+                f"<input type='hidden' name='ajax' value='1'>"
                 f"<button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form></td>"
                 f"</tr>"
             )
@@ -2282,6 +2312,8 @@ def save_draftday_state(
         cur.close()
         conn.close()
 
+    if (round_name or request.query_params.get('ajax','') == '1') and request.headers.get('x-requested-with','').lower() == 'fetch':
+        return JSONResponse({"ok": True, "current_round": round_value, "redirect": f"/?tab=draftday&current_round={round_value}"})
     return RedirectResponse(f"/?tab=draftday&current_round={round_value}", status_code=303)
 
 
