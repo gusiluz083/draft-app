@@ -15,6 +15,68 @@ import uuid
 
 app = FastAPI()
 
+
+def _norm_header(value: str) -> str:
+    value = (value or '').strip().lower()
+    replacements = {
+        'á': 'a', 'à': 'a', 'ä': 'a',
+        'é': 'e', 'è': 'e', 'ë': 'e',
+        'í': 'i', 'ì': 'i', 'ï': 'i',
+        'ó': 'o', 'ò': 'o', 'ö': 'o',
+        'ú': 'u', 'ù': 'u', 'ü': 'u',
+        'ñ': 'n',
+    }
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+    return re.sub(r'[^a-z0-9]+', '', value)
+
+
+def _normalize_new_player_position(value: str) -> str:
+    raw = (value or '').strip()
+    normalized = _norm_header(raw)
+    mapping = {
+        'portera': 'Portera',
+        'porteria': 'Portera',
+        'goalkeeper': 'Portera',
+        'gk': 'Portera',
+        'defensa': 'Defensa',
+        'defender': 'Defensa',
+        'medio': 'Medio',
+        'mediocampo': 'Medio',
+        'midfielder': 'Medio',
+        'centrocampista': 'Medio',
+        'delantera': 'Delantera',
+        'forward': 'Delantera',
+        'atacante': 'Delantera',
+    }
+    return mapping.get(normalized, raw)
+
+
+def _read_csv_rows(upload: UploadFile):
+    raw = upload.file.read()
+    text_data = raw.decode('utf-8-sig')
+    lines = text_data.splitlines()
+    if not lines:
+        return []
+    sample = '
+'.join(lines[:5])
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=',;	|')
+        delimiter = dialect.delimiter
+    except Exception:
+        delimiter = ';' if ';' in sample else ','
+    reader = csv.DictReader(lines, delimiter=delimiter)
+    return list(reader)
+
+
+def _pick_row_value(row: dict, *keys: str) -> str:
+    normalized = {_norm_header(k): (v or '') for k, v in row.items()}
+    for key in keys:
+        value = normalized.get(_norm_header(key), '')
+        if value.strip():
+            return value.strip()
+    return ''
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
@@ -1894,9 +1956,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
-        f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
-            f"<div class='actions-toolbar' style='margin:12px 0 14px;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a></div>"
-            
+            f"<div class='actions-toolbar' style='margin:12px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><form action='/import-newplayers' method='post' enctype='multipart/form-data' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0;'><input type='file' name='file' accept='.csv' required><button class='btn btn-success' type='submit' onclick=\"return confirm('Se sustituirá por completo el listado actual de jugadoras nuevas. ¿Continuar?')\">Importar CSV</button></form></div>"
             f"{add_box}"
             f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
             f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, dorsal, posición, notas'></div>"
