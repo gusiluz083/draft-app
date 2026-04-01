@@ -3079,6 +3079,16 @@ def export_excel(request: Request, tab: str = "database"):
         cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%' ORDER BY id DESC")
         rows = cur.fetchall()
         headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
+    elif tab == "newplayers":
+        cur.execute(
+            '''
+            SELECT COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(club,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
+            FROM new_players
+            ORDER BY id DESC, name ASC
+            '''
+        )
+        rows = cur.fetchall()
+        headers = ["Dorsal", "Nombre y apellidos", "Posición", "Club / Procedencia", "Nivel estimado", "Encaje", "Estado", "Observaciones"]
     elif tab == "draftday":
         current_round = request.query_params.get("current_round", "1")
         current_round = int(current_round) if str(current_round).isdigit() and 1 <= int(current_round) <= 10 else 1
