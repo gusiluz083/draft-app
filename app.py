@@ -3015,6 +3015,56 @@ def import_csv(request: Request, file: UploadFile = File(...)):
     return RedirectResponse("/?tab=database", status_code=303)
 
 
+
+@app.post("/import-newplayers")
+def import_newplayers_csv(request: Request, file: UploadFile = File(...)):
+    if not require_user(request):
+        return RedirectResponse("/login", status_code=303)
+
+    rows = _read_csv_rows(file)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM new_players")
+
+        for row in rows:
+            dorsal = _pick_row_value(row, "dorsal", "#", "numero")
+            name = _pick_row_value(row, "nombre completo", "nombre y apellidos", "nombre", "name", "jugadora")
+            position = _normalize_new_player_position(_pick_row_value(row, "posicion", "posición", "position", "rol", "role"))
+            club = _pick_row_value(row, "club", "club / procedencia", "club/procedencia", "procedencia", "equipo actual", "equipo", "provincia")
+            notes = _pick_row_value(row, "observaciones", "observacion", "notas", "notes")
+            estimated_level = _pick_row_value(row, "nivel estimado", "nivel")
+            fit_level = _pick_row_value(row, "encaje", "fit level", "fitlevel")
+            scout_status = _pick_row_value(row, "estado", "scout status", "scoutstatus") or "Seguimiento"
+
+            if not name:
+                continue
+
+            cur.execute(
+                "INSERT INTO new_players (dorsal, name, position, club, estimated_level, fit_level, scout_status, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    dorsal.strip(),
+                    name.strip(),
+                    position.strip(),
+                    club.strip(),
+                    estimated_level.strip(),
+                    fit_level.strip(),
+                    scout_status.strip() or "Seguimiento",
+                    notes.strip(),
+                ),
+            )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+    return RedirectResponse("/?tab=newplayers", status_code=303)
+
 @app.get("/export")
 def export_excel(request: Request, tab: str = "database"):
     if not require_user(request):
