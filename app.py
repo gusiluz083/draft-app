@@ -1932,7 +1932,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for pid, dorsal, name, position, estimated_level, fit_level, scout_status, notes in players:
             search_blob = " ".join([dorsal or "", name or "", position or "", estimated_level or "", fit_level or "", scout_status or "", notes or ""])
             actions = "".join([
-                f"<a class='btn btn-light action-btn' href='/new-player/{pid}' target='_blank'>Ver ficha</a>",
+                f"<a class='btn btn-light action-btn' href='/new-player/{pid}'>Ver ficha</a>",
                 f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
@@ -3246,9 +3246,9 @@ def new_player_page(player_id: int, request: Request):
         f"<div class='card'><h2>Media scouting</h2><label>Foto principal (URL)</label><input name='photo_url' value='{html.escape(photo_url)}'>{photo_preview}"
         f"<div class='grid' style='margin-top:12px;'><div><label>Vídeo 1</label><input name='video1_url' value='{html.escape(video1_url)}'></div><div><label>Vídeo 2</label><input name='video2_url' value='{html.escape(video2_url)}'></div><div><label>Vídeo 3</label><input name='video3_url' value='{html.escape(video3_url)}'></div></div>"
         f"<div class='actions-toolbar' style='margin-top:12px;'>"
-        + (f"<a class='btn btn-secondary' href='{html.escape(video1_url)}' target='_blank'>Abrir vídeo 1</a>" if video1_url else "")
-        + (f"<a class='btn btn-secondary' href='{html.escape(video2_url)}' target='_blank'>Abrir vídeo 2</a>" if video2_url else "")
-        + (f"<a class='btn btn-secondary' href='{html.escape(video3_url)}' target='_blank'>Abrir vídeo 3</a>" if video3_url else "")
+        + (f"<a class='btn btn-secondary' href='{html.escape(video1_url)}'>Abrir vídeo 1</a>" if video1_url else "")
+        + (f"<a class='btn btn-secondary' href='{html.escape(video2_url)}'>Abrir vídeo 2</a>" if video2_url else "")
+        + (f"<a class='btn btn-secondary' href='{html.escape(video3_url)}'>Abrir vídeo 3</a>" if video3_url else "")
         + f"</div></div></div></div>"
         f"<div class='actions-toolbar' style='margin-top:16px;'><button type='submit'>Guardar ficha</button><a class='btn btn-secondary' href='/?tab=newplayers'>Cancelar</a></div>"
         f"</form>"
