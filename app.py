@@ -4,6 +4,7 @@ import io
 import html
 import hashlib
 import json
+import re
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, UploadFile, File, Request
@@ -15,67 +16,66 @@ import uuid
 
 app = FastAPI()
 
-
 def _norm_header(value: str) -> str:
-    value = (value or '').strip().lower()
+    value = (value or "").strip().lower()
     replacements = {
-        'á': 'a', 'à': 'a', 'ä': 'a',
-        'é': 'e', 'è': 'e', 'ë': 'e',
-        'í': 'i', 'ì': 'i', 'ï': 'i',
-        'ó': 'o', 'ò': 'o', 'ö': 'o',
-        'ú': 'u', 'ù': 'u', 'ü': 'u',
-        'ñ': 'n',
+        "á": "a", "à": "a", "ä": "a",
+        "é": "e", "è": "e", "ë": "e",
+        "í": "i", "ì": "i", "ï": "i",
+        "ó": "o", "ò": "o", "ö": "o",
+        "ú": "u", "ù": "u", "ü": "u",
+        "ñ": "n",
     }
     for old, new in replacements.items():
         value = value.replace(old, new)
-    return re.sub(r'[^a-z0-9]+', '', value)
+    return re.sub(r"[^a-z0-9]+", "", value)
 
 
 def _normalize_new_player_position(value: str) -> str:
-    raw = (value or '').strip()
+    raw = (value or "").strip()
     normalized = _norm_header(raw)
     mapping = {
-        'portera': 'Portera',
-        'porteria': 'Portera',
-        'goalkeeper': 'Portera',
-        'gk': 'Portera',
-        'defensa': 'Defensa',
-        'defender': 'Defensa',
-        'medio': 'Medio',
-        'mediocampo': 'Medio',
-        'midfielder': 'Medio',
-        'centrocampista': 'Medio',
-        'delantera': 'Delantera',
-        'forward': 'Delantera',
-        'atacante': 'Delantera',
+        "portera": "Portera",
+        "porteria": "Portera",
+        "goalkeeper": "Portera",
+        "gk": "Portera",
+        "defensa": "Defensa",
+        "defender": "Defensa",
+        "medio": "Medio",
+        "mediocampo": "Medio",
+        "midfielder": "Medio",
+        "centrocampista": "Medio",
+        "delantera": "Delantera",
+        "forward": "Delantera",
+        "atacante": "Delantera",
     }
     return mapping.get(normalized, raw)
 
 
 def _read_csv_rows(upload: UploadFile):
     raw = upload.file.read()
-    text_data = raw.decode('utf-8-sig')
+    text_data = raw.decode("utf-8-sig")
     lines = text_data.splitlines()
     if not lines:
         return []
-    sample = '
-'.join(lines[:5])
+    sample = "\n".join(lines[:5])
     try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=',;	|')
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
         delimiter = dialect.delimiter
     except Exception:
-        delimiter = ';' if ';' in sample else ','
+        delimiter = ";" if ";" in sample else ","
     reader = csv.DictReader(lines, delimiter=delimiter)
     return list(reader)
 
 
 def _pick_row_value(row: dict, *keys: str) -> str:
-    normalized = {_norm_header(k): (v or '') for k, v in row.items()}
+    normalized = {_norm_header(k): (v or "") for k, v in row.items()}
     for key in keys:
-        value = normalized.get(_norm_header(key), '')
+        value = normalized.get(_norm_header(key), "")
         if value.strip():
             return value.strip()
-    return ''
+    return ""
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
