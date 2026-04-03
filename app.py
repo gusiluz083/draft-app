@@ -1901,8 +1901,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
-        all_board_html = (
-            "<div id='draftdayAllBoardBody' style='margin-top:10px;'><div class='muted'>Este panel se carga solo al abrirlo para que el cambio de ronda sea más rápido.</div></div>"
+        all_board_html = render_draftday_all_board_html(
+            board_team,
+            current_round,
+            (all_board_q or "").strip(),
+            (all_board_round or "").strip(),
         )
         blocked_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Ord</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
 
@@ -2490,6 +2493,34 @@ async def save_all_objectives(request: Request):
 
 
 def render_draftday_all_board_html(board_team: str, current_round: int, all_board_q: str = "", all_board_round: str = ""):
+    all_objectives_rows = ""
+    for apid, aname, ateam, aposition, anotes, astatus, adraft_round, around_order in get_all_objectives(board_team):
+        apos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(aposition, (aposition or "")[:3].upper())
+        around_text = str(adraft_round or "")
+        asearch = " ".join([aname or "", ateam or "", aposition or "", anotes or "", around_text]).lower()
+
+        if all_board_q and all_board_q.lower() not in asearch:
+            continue
+        if all_board_round and all_board_round != around_text:
+            continue
+
+        all_objectives_rows += (
+            f"<tr data-all-board-row='1' data-round='{html.escape(around_text)}' data-search='{html.escape(asearch)}'>"
+            f"<td>{html.escape(aname or '')}</td>"
+            f"<td>{html.escape(around_text)}</td>"
+            f"<td>{html.escape(str(around_order or ''))}</td>"
+            f"<td>{html.escape(apos_short)}</td>"
+            f"<td><form class='inline-form draftday-ajax-form' action='/decision/{apid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
+            f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
+            f"<input type='hidden' name='source_tab' value='draftday'>"
+            f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+            f"<input type='hidden' name='ajax' value='1'>"
+            f"<button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form></td>"
+            f"</tr>"
+        )
+
+    if not all_objectives_rows:
+        all_objectives_rows = "<tr><td colspan='5' class='muted'>No tienes jugadoras activas en Draft Day.</td></tr>"
 
     all_board_html = (
         "<form class='allboard-toolbar' method='get' action='/'>"
@@ -2500,11 +2531,10 @@ def render_draftday_all_board_html(board_team: str, current_round: int, all_boar
         + "<option value=''>Todas las rondas</option>"
         + "".join([f"<option value='{i}' {'selected' if all_board_round == str(i) else ''}>{i}</option>" for i in range(1,11)])
         + "</select>"
+        + "<button class='btn btn-secondary' type='submit'>Buscar</button>"
         + "<button class='btn btn-light' type='button' onclick='clearAllBoardFilters()'>Limpiar</button>"
         + "</form>"
-        + "<table class='draftday-table' style='margin-top:10px;'><thead><tr><th>Jugadora</th><th>Ronda</th><th>Ord</th><th>Pos</th><th>Acción</th></tr></thead><tbody>"
-        + all_objectives_rows
-        + "</tbody></table>"
+        + f"<table class='draftday-table allboard-table'><thead><tr><th>Jugadora</th><th>R</th><th>Ord</th><th>Pos</th><th>Acción</th></tr></thead><tbody>{all_objectives_rows}</tbody></table>"
     )
     return all_board_html
 
