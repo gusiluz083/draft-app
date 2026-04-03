@@ -551,13 +551,7 @@ async function loadDraftdayRound(round){
 document.addEventListener('click', async (e) => {
  const link = e.target.closest('.draftday-round-tab');
  if(!link) return;
- e.preventDefault();
- const round = link.getAttribute('data-round');
- if(!round){
-   window.location.href = link.href;
-   return;
- }
- await loadDraftdayRound(round);
+ // navegación normal: más rápida y más estable que repintar varios bloques por JS
 });
 
 document.addEventListener('DOMContentLoaded',()=>{
@@ -1867,34 +1861,6 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         if not rows:
             rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
-        all_objectives_rows = ""
-        for apid, aname, ateam, aposition, anotes, astatus, adraft_round, around_order in get_all_objectives(board_team):
-            apos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(aposition, (aposition or "")[:3].upper())
-            around_text = str(adraft_round or "")
-            asearch = " ".join([aname or "", ateam or "", aposition or "", anotes or "", around_text]).lower()
-
-            if all_board_q and all_board_q.lower() not in asearch:
-                continue
-            if all_board_round and all_board_round != around_text:
-                continue
-
-            all_objectives_rows += (
-                f"<tr data-all-board-row='1' data-round='{html.escape(around_text)}' data-search='{html.escape(asearch)}'>"
-                f"<td>{html.escape(aname or '')}</td>"
-                f"<td>{html.escape(around_text)}</td>"
-                f"<td>{html.escape(str(around_order or ''))}</td>"
-                f"<td>{html.escape(apos_short)}</td>"
-                f"<td><form class='inline-form draftday-ajax-form' action='/decision/{apid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
-                f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
-                f"<input type='hidden' name='source_tab' value='draftday'>"
-                f"<input type='hidden' name='current_round_form' value='{current_round}'>"
-                f"<input type='hidden' name='ajax' value='1'>"
-                f"<button class='btn-secondary action-btn' type='submit'>Otro equipo</button></form></td>"
-                f"</tr>"
-            )
-        if not all_objectives_rows:
-            all_objectives_rows = "<tr><td colspan='5' class='muted'>No tienes jugadoras activas en Draft Day.</td></tr>"
-
         blocked_rows = ""
         for b_name, b_team, b_position, b_round, b_order in get_blocked_players(board_team, current_round):
             b_pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(b_position, (b_position or "")[:3].upper())
@@ -1925,18 +1891,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
         all_board_html = (
-            "<form class='allboard-toolbar' method='get' action='/'>"
-            "<input type='hidden' name='tab' value='draftday'>"
-            + f"<input type='hidden' name='current_round' value='{current_round}'>"
-            + f"<input id='allBoardSearch' name='all_board_q' placeholder='Buscar jugadora...' value='{html.escape(all_board_q)}'>"
-            + "<select id='allBoardRound' name='all_board_round'>"
-            + "<option value=''>Todas las rondas</option>"
-            + "".join([f"<option value='{i}' {'selected' if all_board_round == str(i) else ''}>{i}</option>" for i in range(1,11)])
-            + "</select>"
-            + "<button class='btn btn-secondary' type='submit'>Buscar</button>"
-            + "<a class='btn btn-light' href='/?tab=draftday&current_round=" + str(current_round) + "'>Limpiar</a>"
-            + "</form>"
-            + f"<table class='draftday-table allboard-table'><thead><tr><th>Jugadora</th><th>R</th><th>Ord</th><th>Pos</th><th>Acción</th></tr></thead><tbody>{all_objectives_rows}</tbody></table>"
+            "<details id='draftdayAllBoardDetails' class='card' style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>Control global de todas las rondas (mostrar / ocultar)</summary><div id='draftdayAllBoardBody' style='margin-top:10px;'><div class='muted'>Este panel se carga solo al abrirlo para que el cambio de ronda sea más rápido.</div></div></details>"
         )
         blocked_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Ord</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
 
@@ -2519,6 +2474,42 @@ async def save_all_objectives(request: Request):
         conn.close()
 
     return RedirectResponse("/?tab=objectives", status_code=303)
+
+
+
+
+def render_draftday_all_board_html(board_team: str, current_round: int, all_board_q: str = "", all_board_round: str = ""):
+
+    all_board_html = (
+        "<form class='allboard-toolbar' method='get' action='/'>"
+        "<input type='hidden' name='tab' value='draftday'>"
+        + f"<input type='hidden' name='current_round' value='{current_round}'>"
+        + f"<input id='allBoardSearch' name='all_board_q' placeholder='Buscar jugadora...' value='{html.escape(all_board_q)}'>"
+        + "<select id='allBoardRound' name='all_board_round'>"
+        + "<option value=''>Todas las rondas</option>"
+        + "".join([f"<option value='{i}' {'selected' if all_board_round == str(i) else ''}>{i}</option>" for i in range(1,11)])
+        + "</select>"
+        + "<button class='btn btn-light' type='button' onclick='clearAllBoardFilters()'>Limpiar</button>"
+        + "</form>"
+        + "<table class='draftday-table' style='margin-top:10px;'><thead><tr><th>Jugadora</th><th>Ronda</th><th>Ord</th><th>Pos</th><th>Acción</th></tr></thead><tbody>"
+        + all_objectives_rows
+        + "</tbody></table>"
+    )
+    return all_board_html
+
+
+@app.get("/draftday-all-board-fragment")
+def draftday_all_board_fragment(request: Request, current_round: int = 1, all_board_q: str = "", all_board_round: str = ""):
+    user = require_user(request)
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    board_team = get_team(request)
+    if not board_team:
+        return JSONResponse({"error": "team"}, status_code=400)
+    if not isinstance(current_round, int) or current_round < 1 or current_round > 10:
+        current_round = 1
+    html_block = render_draftday_all_board_html(board_team, current_round, (all_board_q or "").strip(), (all_board_round or "").strip())
+    return JSONResponse({"html": html_block})
 
 
 @app.get("/draftday-round-fragment")
