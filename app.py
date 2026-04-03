@@ -508,6 +508,58 @@ document.addEventListener('submit', async (e) => {
  }
 });
 
+
+async function loadDraftdayRound(round){
+ const stats=document.getElementById('draftdayStats');
+ const tabs=document.getElementById('draftdayTabs');
+ const targets=document.getElementById('draftdayTargetsContainer');
+ const side=document.getElementById('draftdayRoundSide');
+ if(!stats || !tabs || !targets || !side){
+   window.location.href='/?tab=draftday&current_round='+encodeURIComponent(round);
+   return;
+ }
+ try {
+   const res = await fetch('/draftday-round-fragment?current_round='+encodeURIComponent(round), {credentials:'same-origin'});
+   if(!res.ok) throw new Error('HTTP '+res.status);
+   const data = await res.json();
+   stats.innerHTML = data.stats_html || '';
+   tabs.innerHTML = data.tabs_html || '';
+   targets.innerHTML = data.targets_html || '';
+   side.innerHTML = data.side_html || '';
+   const roundSel=document.getElementById('draftdayCurrentRoundSelect');
+   if(roundSel) roundSel.value=String(data.current_round || round);
+   const label=document.getElementById('draftdayRoundNameLabel');
+   if(label) label.textContent='Nombre de la ronda ' + String(data.current_round || round);
+   const input=document.getElementById('draftdayRoundNameInput');
+   if(input) input.value=data.current_round_name || '';
+   const refresh=document.getElementById('draftdayRefreshLink');
+   if(refresh) refresh.href='/?tab=draftday&current_round=' + encodeURIComponent(data.current_round || round);
+   const exportLink=document.getElementById('draftdayExportLink');
+   if(exportLink){
+     exportLink.href='/export?tab=draftday&current_round=' + encodeURIComponent(data.current_round || round);
+     exportLink.textContent='Exportar Excel R' + String(data.current_round || round);
+   }
+   const url = new URL(window.location.href);
+   url.searchParams.set('tab','draftday');
+   url.searchParams.set('current_round', String(data.current_round || round));
+   window.history.replaceState({}, '', url.toString());
+ } catch(err){
+   window.location.href='/?tab=draftday&current_round='+encodeURIComponent(round);
+ }
+}
+
+document.addEventListener('click', async (e) => {
+ const link = e.target.closest('.draftday-round-tab');
+ if(!link) return;
+ e.preventDefault();
+ const round = link.getAttribute('data-round');
+ if(!round){
+   window.location.href = link.href;
+   return;
+ }
+ await loadDraftdayRound(round);
+});
+
 document.addEventListener('DOMContentLoaded',()=>{
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
@@ -650,6 +702,163 @@ function initBoard(){
 </script>
 """
 
+
+
+
+def _compute_draftday_round_direction(current_round: int) -> str:
+    round_direction = "1 → 16"
+    if current_round in (3, 4):
+        round_direction = "16 → 1"
+    elif current_round >= 5:
+        round_direction = "1 → 16" if current_round % 2 == 1 else "16 → 1"
+    return round_direction
+
+
+def get_draftday_round_players(board_team: str, current_round: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT p.id, p.name, p.team, p.position, p.status, COALESCE(p.notes,''), d.status, d.draft_round, d.round_order
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team = %s AND d.status = 'Objetivo' AND COALESCE(d.draft_round, 0) = %s
+        ORDER BY COALESCE(d.round_order, 999) ASC, p.name ASC
+        """,
+        (board_team, current_round),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def render_draftday_round_fragment(board_team: str, current_round: int, round_names: dict, current_pick, next_pick):
+    players = get_draftday_round_players(board_team, current_round)
+    current_round_name = (round_names.get(str(current_round), "") or "").strip()
+    picks_remaining = None
+    if current_pick is not None and next_pick is not None:
+        picks_remaining = max(next_pick - current_pick, 0)
+
+    round_direction = _compute_draftday_round_direction(current_round)
+
+    position_pressure = {}
+    for _pid, _name, _team, _position, _player_status, _notes, _decision_status, _draft_round, _round_order in players:
+        position_pressure[_position] = position_pressure.get(_position, 0) + 1
+
+    rows = ""
+    for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
+        order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
+        actions_html = (
+            f"<div class='draftday-actions'>"
+            f"<form class='inline-form draftday-ajax-form' action='/decision/{pid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
+            f"<input type='hidden' name='status' value='Elegida'>"
+            f"<input type='hidden' name='source_tab' value='draftday'>"
+            f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+            f"<input type='hidden' name='ajax' value='1'>"
+            f"<button class='btn-success action-btn' type='submit'>Firmada</button></form>"
+            f"<form class='inline-form draftday-ajax-form' action='/decision/{pid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
+            f"<input type='hidden' name='status' value='Fichada por otro equipo'>"
+            f"<input type='hidden' name='source_tab' value='draftday'>"
+            f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+            f"<input type='hidden' name='ajax' value='1'>"
+            f"<button class='btn btn-secondary action-btn' type='submit'>Otro equipo</button></form>"
+            f"<form class='inline-form draftday-ajax-form' action='/decision/{pid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
+            f"<input type='hidden' name='status' value='Descartada'>"
+            f"<input type='hidden' name='source_tab' value='draftday'>"
+            f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+            f"<input type='hidden' name='ajax' value='1'>"
+            f"<button class='btn-danger action-btn' type='submit'>Descartar</button></form>"
+            f"<form class='inline-form draftday-ajax-form' action='/remove-objective/{pid}?source_tab=draftday&current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
+            f"<input type='hidden' name='current_round_form' value='{current_round}'>"
+            f"<input type='hidden' name='ajax' value='1'>"
+            f"<button class='btn btn-light action-btn' type='submit'>Quitar</button></form>"
+            f"</div>"
+        )
+        pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(position, (position or "")[:3].upper())
+        risk_text = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
+        note_short = html.escape(notes or "")
+        rows += f"<tr data-draftday-row='1'><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td>{html.escape(team or '')}</td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
+    if not rows:
+        rows = "<tr><td colspan='6' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
+
+    table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Orden</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+    targets_html = f"<div class='card'><h2>Targets de la ronda {current_round}{(' · ' + html.escape(current_round_name)) if current_round_name else ''}</h2><div class='table-wrap'>{table_html}</div></div>"
+
+    blocked_rows = ""
+    for b_name, b_team, b_position, b_round, b_order in get_blocked_players(board_team, current_round):
+        b_pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(b_position, (b_position or "")[:3].upper())
+        blocked_rows += (
+            f"<tr><td>{html.escape(b_name or '')}</td>"
+            f"<td>{html.escape((b_team or '')[:10])}</td>"
+            f"<td>{html.escape(b_pos_short)}</td>"
+            f"<td>{html.escape(str(b_order or ''))}</td></tr>"
+        )
+    if not blocked_rows:
+        blocked_rows = "<tr><td colspan='4' class='muted'>No hay jugadoras bloqueadas en esta ronda.</td></tr>"
+    blocked_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Ord</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
+
+    madam_box = ""
+    if is_new_team(board_team):
+        used_teams = get_madam_used_legacy_teams()
+        used_list = "".join([f"<li>{html.escape(t)}</li>" for t in used_teams]) if used_teams else "<li class='muted'>Ningún equipo antiguo usado todavía</li>"
+        madam_box = (
+            "<div class='card'><h2>Regla especial MADAM (equipo nuevo)</h2>"
+            "<div class='muted'>En rondas 1 y 2, entre los equipos nuevos, solo puede salir una jugadora de cada equipo pre-existente. Este panel te ayuda a controlar qué clubes ya has tocado.</div>"
+            f"<ul style='margin-top:10px;padding-left:18px;'>{used_list}</ul>"
+            "</div>"
+        )
+
+    simulator_html = (
+        f"<div id='draftdayRoundSide'>"
+            f"<div class='card'><h2>Simulador de picks rivales</h2>"
+        f"<div class='note-box'>"
+        f"<strong>Picks hasta tu turno:</strong> {picks_remaining if picks_remaining is not None else '—'}<br>"
+        f"<strong>Lectura rápida:</strong><br>"
+        f"• Si quedan pocos picks y tienes muchas {max(position_pressure, key=position_pressure.get) if position_pressure else 'jugadoras'} en la ronda, el riesgo sube.<br>"
+        f"• Si una posición concentra muchos targets, es más probable que otro equipo te la quite antes.<br>"
+        f"• Usa primero las jugadoras con riesgo <strong>ALTO</strong>."
+        f"</div>"
+        f"<div class='table-wrap' style='margin-top:12px;'><table>"
+        f"<thead><tr><th>Posición</th><th>Targets tuyos en la ronda</th><th>Presión estimada</th></tr></thead>"
+        f"<tbody>"
+        + ''.join([
+            f"<tr><td>{pos}</td><td>{cnt}</td><td>{'ALTA' if cnt >= 3 else 'MEDIA' if cnt == 2 else 'BAJA'}</td></tr>"
+            for pos, cnt in sorted(position_pressure.items())
+        ]) +
+        ("" if position_pressure else "<tr><td colspan='3' class='muted'>Sin targets cargados en esta ronda.</td></tr>") +
+        f"</tbody></table></div>"
+        f"</div>"
+    )
+    side_html = simulator_html + f"<div class='card'><h2>Bloqueadas / cogidas por otros equipos</h2><div class='table-wrap'>{blocked_html}</div></div>" + madam_box
+
+    pick_summary = "—"
+    if current_pick is not None and next_pick is not None:
+        pick_summary = f"Actual {current_pick} · Siguiente {next_pick}"
+    elif current_pick is not None:
+        pick_summary = f"Actual {current_pick}"
+    elif next_pick is not None:
+        pick_summary = f"Siguiente {next_pick}"
+
+    stats_html = (
+        f"<div class='stat'><div class='muted'>Ronda actual</div><div class='stat-number'>{current_round}</div></div>"
+        f"<div class='stat'><div class='muted'>Orden de la ronda</div><div class='stat-number' style='font-size:22px'>{round_direction}</div></div>"
+        f"<div class='stat'><div class='muted'>Pick / siguiente</div><div class='stat-number' style='font-size:20px'>{pick_summary}</div></div>"
+        f"<div class='stat'><div class='muted'>Picks hasta tu turno</div><div class='stat-number'>{picks_remaining if picks_remaining is not None else '—'}</div></div>"
+    )
+    tabs_html = "".join([
+        f"<a class='tab draftday-round-tab {'active' if current_round==i else ''}' href='/?tab=draftday&current_round={i}' data-round='{i}'>R{i}{(' · ' + html.escape((round_names.get(str(i), '') or '').strip())) if (round_names.get(str(i), '') or '').strip() else ''}</a>"
+        for i in range(1,11)
+    ])
+
+    return {
+        "current_round": current_round,
+        "current_round_name": current_round_name,
+        "stats_html": stats_html,
+        "tabs_html": tabs_html,
+        "targets_html": targets_html,
+        "side_html": side_html,
+    }
 
 def page(content: str) -> str:
     return f"<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>Draft Web</title>{CSS}</head><body><div class='container'>{content}</div>{SCRIPT}</body></html>"
@@ -1699,7 +1908,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             blocked_rows = "<tr><td colspan='4' class='muted'>No hay jugadoras bloqueadas en esta ronda.</td></tr>"
 
         round_tabs = "".join([
-            f"<a class='tab {'active' if current_round==i else ''}' href='/?tab=draftday&current_round={i}'>R{i}{(' · ' + html.escape((round_names.get(str(i), '') or '').strip())) if (round_names.get(str(i), '') or '').strip() else ''}</a>"
+            f"<a class='tab draftday-round-tab {'active' if current_round==i else ''}' href='/?tab=draftday&current_round={i}' data-round='{i}'>R{i}{(' · ' + html.escape((round_names.get(str(i), '') or '').strip())) if (round_names.get(str(i), '') or '').strip() else ''}</a>"
             for i in range(1,11)
         ])
 
@@ -1752,24 +1961,24 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='card'><h2>Control del draft</h2>"
             f"<form action='/draftday-state' method='post'>"
             f"<div class='grid'>"
-            f"<div><label>Ronda actual</label><select name='current_round'>"
+            f"<div><label>Ronda actual</label><select id='draftdayCurrentRoundSelect' name='current_round'>"
             + "".join([f"<option value='{i}' {'selected' if current_round==i else ''}>{i}</option>" for i in range(1,11)])
             + f"</select></div>"
             f"<div><label>Pick actual</label><input name='current_pick' value='{current_pick if current_pick is not None else ''}' placeholder='Ej. 23'></div>"
             f"<div><label>Siguiente pick propio</label><input name='next_pick' value='{next_pick if next_pick is not None else ''}' placeholder='Ej. 31'></div>"
-            f"<div><label>Nombre de la ronda {current_round}</label><input name='round_name' value='{html.escape(current_round_name)}' placeholder='Ej. MEDIO, DELANTERA, PORTERA'></div>"
-            f"<div style='display:flex;gap:8px;align-items:end;flex-wrap:wrap;'><button type='submit'>Guardar control draft</button><a class='btn btn-secondary' href='/?tab=draftday&current_round={current_round}'>Actualizar</a><a class='btn btn-success' href='/export?tab=draftday&current_round={current_round}'>Exportar Excel R{current_round}</a></div>"
+            f"<div><label id='draftdayRoundNameLabel'>Nombre de la ronda {current_round}</label><input id='draftdayRoundNameInput' name='round_name' value='{html.escape(current_round_name)}' placeholder='Ej. MEDIO, DELANTERA, PORTERA'></div>"
+            f"<div style='display:flex;gap:8px;align-items:end;flex-wrap:wrap;'><button type='submit'>Guardar control draft</button><a id='draftdayRefreshLink' class='btn btn-secondary' href='/?tab=draftday&current_round={current_round}'>Actualizar</a><a id='draftdayExportLink' class='btn btn-success' href='/export?tab=draftday&current_round={current_round}'>Exportar Excel R{current_round}</a></div>"
             f"</div></form>"
             f"</div>"
-            f"<div class='stats'>"
+            f"<div id='draftdayStats' class='stats'>"
             f"<div class='stat'><div class='muted'>Ronda actual</div><div class='stat-number'>{current_round}</div></div>"
             f"<div class='stat'><div class='muted'>Orden de la ronda</div><div class='stat-number' style='font-size:22px'>{round_direction}</div></div>"
             f"<div class='stat'><div class='muted'>Pick / siguiente</div><div class='stat-number' style='font-size:20px'>{pick_summary}</div></div>"
             f"<div class='stat'><div class='muted'>Picks hasta tu turno</div><div class='stat-number'>{picks_remaining if picks_remaining is not None else '—'}</div></div>"
             f"</div>"
-            f"<div class='tabs'>{round_tabs}</div>"
+            f"<div id='draftdayTabs' class='tabs'>{round_tabs}</div>"
             f"<div class='draftday-grid'>"
-            f"<div><div class='card'><h2>Targets de la ronda {current_round}{(' · ' + html.escape(current_round_name)) if current_round_name else ''}</h2><div class='table-wrap'>{table_html}</div></div>"
+            f"<div><div id='draftdayTargetsContainer'><div class='card'><h2>Targets de la ronda {current_round}{(' · ' + html.escape(current_round_name)) if current_round_name else ''}</h2><div class='table-wrap'>{table_html}</div></div></div>"
             f"<details class='card' style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>Control global de todas las rondas (mostrar / ocultar)</summary><div style='margin-top:10px;'><div class='muted'>Usa este filtro para localizar cualquier jugadora de cualquier ronda y marcarla rápidamente como fichada por otro equipo.</div><div class='table-wrap' style='margin-top:10px;'>{all_board_html}</div></div></details>"
             f"<div>"
             f"<div class='card'><h2>Composición actual</h2>"
@@ -1782,6 +1991,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</div>"
             f"<div class='note-box' style='margin-top:12px;'><strong>Objetivo de plantilla:</strong> 12 jugadoras totales = 1 Wild Card + 9/10 Draft + 1/2 Live Tryouts.</div>"
             f"</div>"
+            f"<div id='draftdayRoundSide'>"
             f"<div class='card'><h2>Simulador de picks rivales</h2>"
             f"<div class='note-box'>"
             f"<strong>Picks hasta tu turno:</strong> {picks_remaining if picks_remaining is not None else '—'}<br>"
@@ -1802,6 +2012,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"</div>"
             f"<div class='card'><h2>Bloqueadas / cogidas por otros equipos</h2><div class='table-wrap'>{blocked_html}</div></div>"
             f"{madam_box}"
+            f"</div>"
+            f"</div>"
             f"</div>"
             f"</div>"
         )
@@ -2307,6 +2519,28 @@ async def save_all_objectives(request: Request):
         conn.close()
 
     return RedirectResponse("/?tab=objectives", status_code=303)
+
+
+@app.get("/draftday-round-fragment")
+def draftday_round_fragment(request: Request, current_round: int = 1):
+    user = require_user(request)
+    if not user:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    board_team = get_team(request)
+    if not board_team:
+        return JSONResponse({"error": "team"}, status_code=400)
+    if not isinstance(current_round, int) or current_round < 1 or current_round > 10:
+        current_round = 1
+    draft_state = get_draftday_state(board_team)
+    round_names = draft_state.get("round_names", {}) or {}
+    fragment = render_draftday_round_fragment(
+        board_team,
+        current_round,
+        round_names,
+        draft_state.get("current_pick"),
+        draft_state.get("next_pick"),
+    )
+    return JSONResponse(fragment)
 
 
 @app.post("/draftday-state")
