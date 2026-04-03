@@ -472,6 +472,28 @@ function clearAllBoardFilters(){
  if(rd) rd.value='';
  filterAllBoard();
 }
+
+function toggleSelectAll(master){
+ const checked = !!(master && master.checked);
+ document.querySelectorAll("input[name='player_ids']").forEach(cb => {
+   if(!cb.disabled) cb.checked = checked;
+ });
+}
+function toggleSelectAllSelected(master){
+ const checked = !!(master && master.checked);
+ document.querySelectorAll("input[name='selected_player_ids']").forEach(cb => {
+   if(!cb.disabled) cb.checked = checked;
+ });
+}
+function clearSelectedPlayers(){
+ document.querySelectorAll("input[name='player_ids'], input[name='selected_player_ids']").forEach(cb => {
+   if(!cb.disabled) cb.checked = false;
+ });
+ const allPlayers=document.getElementById('selectAllPlayers');
+ if(allPlayers) allPlayers.checked = false;
+ const allObjectives=document.getElementById('selectAllObjectives');
+ if(allObjectives) allObjectives.checked = false;
+}
 function updateDraftdayUi(data){
  if(!data) return;
  const byId = (id) => document.getElementById(id);
