@@ -135,6 +135,7 @@ def get_conn():
         cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS season_goals INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS season_assists INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS season_minutes INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS import_source TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS team_board_state (
@@ -1549,7 +1550,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='8' class='muted'>No hay jugadoras.</td></tr>"
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><a class='btn btn-success' href='/export?tab=database'>Exportar Excel</a><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'></button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><button class='btn btn-danger' type='submit' formaction='/bulk-delete-players' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar las jugadoras seleccionadas?')\">Eliminar seleccionadas</button><a class='btn btn-success' href='/export?tab=database'>Exportar Excel</a><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form action='/bulk-objective' method='post'>"
             f"{bulk_actions}"
@@ -3008,6 +3009,29 @@ def delete_player(player_id: int, request: Request):
     return RedirectResponse("/?tab=database", status_code=303)
 
 
+@app.post("/bulk-delete-players")
+def bulk_delete_players(request: Request, player_ids: list[int] = Form(default=[])):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    if not user.get("is_admin"):
+        return RedirectResponse("/?tab=database", status_code=303)
+    ids = [int(pid) for pid in player_ids if str(pid).isdigit()]
+    if ids:
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("DELETE FROM players WHERE id = ANY(%s)", (ids,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+            conn.close()
+    return RedirectResponse("/?tab=database", status_code=303)
+
+
 @app.post("/import")
 def import_csv(request: Request, file: UploadFile = File(...)):
     if not require_user(request):
@@ -3016,7 +3040,7 @@ def import_csv(request: Request, file: UploadFile = File(...)):
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM players WHERE COALESCE(notes,'') LIKE '[IMPORT_JUGADORAS_CSV]%'" )
+        cur.execute("DELETE FROM players WHERE COALESCE(import_source,'') = 'IMPORT_JUGADORAS_CSV'")
         for row in rows:
             dorsal = _pick_row_value(row, "dorsal", "#", "numero", "nº", "n°", "n", "no")
             name = _pick_row_value(row, "nombre completo", "nombre y apellidos", "name", "jugadora")
@@ -3031,14 +3055,14 @@ def import_csv(request: Request, file: UploadFile = File(...)):
             comunidad = _pick_row_value(row, "comunidad")
             notes = _pick_row_value(row, "notes", "notas", "observaciones", "observacion")
             if comunidad:
-                notes = f"[IMPORT_JUGADORAS_CSV] Comunidad: {comunidad}" if not notes else f"[IMPORT_JUGADORAS_CSV] Comunidad: {comunidad} | {notes}"
+                notes = f"Comunidad: {comunidad}" if not notes else f"Comunidad: {comunidad} | {notes}"
             else:
-                notes = f"[IMPORT_JUGADORAS_CSV] {notes}".strip()
+                notes = (notes or "").strip()
             status = _pick_row_value(row, "status", "estado") or "Disponible"
             if name:
                 cur.execute(
-                    "INSERT INTO players (dorsal, name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s,%s)",
-                    (dorsal.strip(), name.strip(), team.strip(), position.strip(), status.strip() or "Disponible", notes.strip()),
+                    "INSERT INTO players (dorsal, name, team, position, status, notes, import_source) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (dorsal.strip(), name.strip(), team.strip(), position.strip(), status.strip() or "Disponible", notes.strip(), "IMPORT_JUGADORAS_CSV"),
                 )
         conn.commit()
     except Exception:
