@@ -11,7 +11,6 @@ from fastapi import FastAPI, Form, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
-from pypdf import PdfReader
 import psycopg2
 import uuid
 
@@ -76,63 +75,8 @@ def _clean_spaces(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "")).strip()
 
 
-def _read_pdf_newplayers_rows(raw: bytes):
-    reader = PdfReader(io.BytesIO(raw))
-    pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    origins = [
-        "Rayo de Barcelona",
-        "Ultimate Móstoles",
-        "Las Pilares FC",
-        "Las Troncas FC",
-        "Queens 2025",
-        "Tryouts 28/03",
-        "El Barrio",
-        "Jijantas FC",
-        "Porcinas FC",
-        "Saiyans FC",
-        "PIO FC",
-        "1K FC",
-    ]
-    rows = []
-    for raw_line in pdf_text.splitlines():
-        line = _clean_spaces(raw_line)
-        if not line:
-            continue
-        normalized = _norm_header(line)
-        if normalized in {"continuidadqueensleague", "norigennombreapellidosposicioncomunidad"}:
-            continue
-        match = re.match(r"^(\d+)\s+(.+?)\s+(GK|DF|MD|FW)\s+(.+)$", line, flags=re.IGNORECASE)
-        if not match:
-            continue
-        dorsal, left_side, position, comunidad = match.groups()
-        left_side = _clean_spaces(left_side)
-        origin = ""
-        full_name = left_side
-        for candidate in origins:
-            prefix = f"{candidate} "
-            if left_side.startswith(prefix):
-                origin = candidate
-                full_name = left_side[len(prefix):].strip()
-                break
-        if not origin or not full_name:
-            continue
-        rows.append({
-            "Nº": dorsal,
-            "ORIGEN": origin,
-            "Nombre completo": full_name,
-            "Posición": position.upper(),
-            "Comunidad": _clean_spaces(comunidad),
-        })
-    return rows
-
-
 def _read_newplayers_import_rows(upload: UploadFile):
-    raw = upload.file.read()
-    filename = (upload.filename or "").lower()
-    content_type = (upload.content_type or "").lower()
-    if filename.endswith(".pdf") or content_type == "application/pdf":
-        return _read_pdf_newplayers_rows(raw)
-    return _read_csv_rows_from_bytes(raw)
+    return _read_csv_rows_from_bytes(upload.file.read())
 
 
 def _pick_row_value(row: dict, *keys: str) -> str:
