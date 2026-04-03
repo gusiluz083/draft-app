@@ -1527,21 +1527,25 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     if tab == "database":
         rows = ""
         for pid, name, team, position, status, notes in players:
-            search_blob = " ".join([name or "", team or "", position or "", status or "", notes or ""])
+            dorsal_match = re.search(r"\[DORSAL:(\d+)\]", notes or "")
+            dorsal = dorsal_match.group(1) if dorsal_match else ""
+            clean_notes = re.sub(r"\s*\[DORSAL:\d+\]", "", notes or "").strip()
+            search_blob = " ".join([dorsal, name or "", team or "", position or "", status or "", clean_notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}?from=/player/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
-            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
+            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(dorsal)}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(clean_notes)}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
-            rows = "<tr><td colspan='7' class='muted'>No hay jugadoras.</td></tr>"
+            rows = "<tr><td colspan='8' class='muted'>No hay jugadoras.</td></tr>"
         bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><a class='btn btn-success' href='/export?tab=database'>Exportar Excel</a><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'></button></div>"
         table_html = (
             f"<form action='/bulk-objective' method='post'>"
             f"{bulk_actions}"
             f"<table><thead><tr>"
             f"<th><input id='selectAllPlayers' type='checkbox' onclick='toggleSelectAll(this)'></th>"
+            f"<th>#</th>"
             f"<th>{head('name','Nombre')}</th>"
             f"<th>{head('team','Equipo actual')}</th>"
             f"<th>{head('position','Posición')}</th>"
@@ -3079,8 +3083,14 @@ def export_excel(request: Request, tab: str = "database"):
     cur = conn.cursor()
     if tab == "database":
         cur.execute("SELECT name, team, position, status, COALESCE(notes,'') FROM players WHERE COALESCE(notes,'') NOT LIKE '%[ORIGEN:NUEVA]%' ORDER BY id DESC")
-        rows = cur.fetchall()
-        headers = ["Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
+        raw_rows = cur.fetchall()
+        rows = []
+        for name, team, position, status, notes in raw_rows:
+            dorsal_match = re.search(r"\[DORSAL:(\d+)\]", notes or "")
+            dorsal = dorsal_match.group(1) if dorsal_match else ""
+            clean_notes = re.sub(r"\s*\[DORSAL:\d+\]", "", notes or "").strip()
+            rows.append((dorsal, name, team, position, status, clean_notes))
+        headers = ["Dorsal", "Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
     elif tab == "newplayers":
         cur.execute(
             '''
