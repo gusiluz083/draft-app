@@ -551,10 +551,21 @@ async function loadDraftdayRound(round){
 document.addEventListener('click', async (e) => {
  const link = e.target.closest('.draftday-round-tab');
  if(!link) return;
- // navegación normal: más rápida y más estable que repintar varios bloques por JS
+ const round = link.getAttribute('data-round') || '';
+ if(!round) return;
+ e.preventDefault();
+ await loadDraftdayRound(round);
 });
 
 document.addEventListener('DOMContentLoaded',()=>{
+ const roundSel=document.getElementById('draftdayCurrentRoundSelect');
+ if(roundSel){
+   roundSel.addEventListener('change', async ()=>{
+     const round = roundSel.value || '';
+     if(!round) return;
+     await loadDraftdayRound(round);
+   });
+ }
  const s=document.getElementById('liveSearch');
  const st=document.getElementById('liveStatus');
  const rd=document.getElementById('liveRound');
@@ -1891,7 +1902,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         table_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
         all_board_html = (
-            "<details id='draftdayAllBoardDetails' class='card' style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>Control global de todas las rondas (mostrar / ocultar)</summary><div id='draftdayAllBoardBody' style='margin-top:10px;'><div class='muted'>Este panel se carga solo al abrirlo para que el cambio de ronda sea más rápido.</div></div></details>"
+            "<div id='draftdayAllBoardBody' style='margin-top:10px;'><div class='muted'>Este panel se carga solo al abrirlo para que el cambio de ronda sea más rápido.</div></div>"
         )
         blocked_html = f"<table class='draftday-table'><thead><tr><th>Jugadora</th><th>Eq.</th><th>Pos</th><th>Ord</th></tr></thead><tbody>{blocked_rows}</tbody></table>"
 
@@ -1934,7 +1945,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div id='draftdayTabs' class='tabs'>{round_tabs}</div>"
             f"<div class='draftday-grid'>"
             f"<div><div id='draftdayTargetsContainer'><div class='card'><h2>Targets de la ronda {current_round}{(' · ' + html.escape(current_round_name)) if current_round_name else ''}</h2><div class='table-wrap'>{table_html}</div></div></div>"
-            f"<details class='card' style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>Control global de todas las rondas (mostrar / ocultar)</summary><div style='margin-top:10px;'><div class='muted'>Usa este filtro para localizar cualquier jugadora de cualquier ronda y marcarla rápidamente como fichada por otro equipo.</div><div class='table-wrap' style='margin-top:10px;'>{all_board_html}</div></div></details>"
+            f"<details id='draftdayAllBoardDetails' class='card' style='margin-top:16px;'><summary style='cursor:pointer;font-weight:600;'>Control global de todas las rondas (mostrar / ocultar)</summary><div style='margin-top:10px;'><div class='muted'>Usa este filtro para localizar cualquier jugadora de cualquier ronda y marcarla rápidamente como fichada rápidamente por otro equipo.</div><div class='table-wrap' style='margin-top:10px;'>{all_board_html}</div></div></details>"
             f"<div>"
             f"<div class='card'><h2>Composición actual</h2>"
             f"<div class='note-box'><strong>Wildcard:</strong> {html.escape(wildcard_name or 'Pendiente')}</div>"
