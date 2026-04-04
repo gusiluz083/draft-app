@@ -504,6 +504,27 @@ function toggleSelectAllDraftday(source){
  boxes.forEach((cb)=>{ cb.checked = !!source.checked; });
 }
 
+function submitDraftdaySingleMove(playerId, currentRound, roundOrder){
+ const select = document.getElementById(`draftday_round_${playerId}`);
+ if(!select) return;
+ const form = document.createElement('form');
+ form.method = 'post';
+ form.action = `/draftday-move-round/${playerId}`;
+ form.style.display = 'none';
+ const addHidden = (name, value) => {
+   const input = document.createElement('input');
+   input.type = 'hidden';
+   input.name = name;
+   input.value = value == null ? '' : String(value);
+   form.appendChild(input);
+ };
+ addHidden('draft_round', select.value);
+ addHidden('round_order', roundOrder || '');
+ addHidden('current_round_form', currentRound || '');
+ document.body.appendChild(form);
+ form.submit();
+}
+
 document.addEventListener('submit', async (e) => {
  const form = e.target;
  if(!form || !form.classList || !form.classList.contains('draftday-ajax-form')) return;
@@ -1463,6 +1484,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     if tab not in ["database", "newplayers", "objectives", "final", "draftday", "board"]:
         tab = "database"
+    if tab == "newplayers":
+        tab = "database"
 
     if tab == "database":
         allowed_sort = ["id", "name", "team", "position", "status"]
@@ -1674,11 +1697,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
                 f"<input type='hidden' name='ajax' value='1'>"
                 f"<button class='btn-danger action-btn' type='submit'>Descartada</button></form>"
-                f"<form class='inline-form' action='/draftday-move-round/{pid}' method='post'>"
-                f"<input type='hidden' name='current_round_form' value='{current_round}'>"
-                f"<input type='hidden' name='round_order' value='{round_order or ''}'>"
-                f"<select name='draft_round' style='width:78px;padding:6px 8px;'>{move_round_options}</select>"
-                f"<button class='btn btn-light action-btn' type='submit'>Mover</button></form>"
+                f"<select id='draftday_round_{pid}' name='draft_round_{pid}' style='width:78px;padding:6px 8px;' form='draftdayBulkMoveForm'>{move_round_options}</select>"
+                f"<button class='btn btn-light action-btn' type='button' onclick='submitDraftdaySingleMove({pid}, {current_round}, {round_order or 0})'>Mover</button>"
                 f"</div>"
             )
             pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(position, (position or "")[:3].upper())
@@ -1745,13 +1765,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "</div>"
             )
 
-        bulk_move_options = "".join([f"<option value='{i}'>{i}</option>" for i in range(1,11)])
         bulk_form = f"<form id='draftdayBulkMoveForm' method='post' action='/draftday-bulk-move'></form>"
         bulk_actions = (
             f"<div class='draftday-actions' style='margin:0 0 12px 0;'>"
             f"<input type='hidden' name='current_round_form' value='{current_round}' form='draftdayBulkMoveForm'>"
-            f"<select name='draft_round' style='width:96px;padding:6px 8px;' form='draftdayBulkMoveForm'>{bulk_move_options}</select>"
-            f"<button class='btn btn-light action-btn' type='submit' form='draftdayBulkMoveForm'>Mover todas</button>"
+            f"<button class='btn btn-light action-btn' type='submit' form='draftdayBulkMoveForm'>Mover seleccionadas</button>"
             f"</div>"
         )
         table_html = f"{bulk_form}{bulk_actions}<table class='draftday-table'><thead><tr><th><input type='checkbox' onclick='toggleSelectAllDraftday(this)'></th><th>#</th><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}"
@@ -1783,7 +1801,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<div class='topbar'><div><h1>DRAFT DAY · {board_team}</h1><div class='muted'>Vista de guerra para el día del draft</div></div>"
             f"<div class='draftday-actions'>"
             f"<a class='btn btn-secondary' href='/?tab=database'>Jugadoras</a>"
-            f"<a class='btn btn-secondary' href='/?tab=newplayers'>Jugadoras nuevas</a>"f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
+            f""f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
             f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
             f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
             f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
@@ -1993,7 +2011,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='actions-toolbar' style='margin:12px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><form action='/import-newplayers' method='post' enctype='multipart/form-data' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0;'><input type='file' name='file' accept='.csv' required><button class='btn btn-success' type='submit' onclick=\"return confirm('Se sustituirá por completo el listado actual de jugadoras nuevas. ¿Continuar?')\">Importar CSV</button></form></div>"
@@ -2069,7 +2087,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 </script>"""
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='card'><strong>Pizarra compartida del equipo</strong><br><span class='muted'>Última actualización: {updated_text}</span><br><span class='muted'>Guardado por: {updated_by_text}</span></div>"
@@ -2085,7 +2103,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
         
@@ -2727,14 +2745,13 @@ async def draftday_move_round(player_id: int, request: Request, draft_round: str
 
 
 @app.post("/draftday-bulk-move")
-async def draftday_bulk_move(request: Request, draft_round: str = Form(""), current_round_form: str = Form("")):
+async def draftday_bulk_move(request: Request, current_round_form: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
 
-    target_round = int(draft_round) if str(draft_round).isdigit() and 1 <= int(draft_round) <= 10 else None
     current_round = int(current_round_form) if str(current_round_form).isdigit() and 1 <= int(current_round_form) <= 10 else None
 
     form = await request.form()
@@ -2749,17 +2766,15 @@ async def draftday_bulk_move(request: Request, draft_round: str = Form(""), curr
     conn = get_conn()
     cur = conn.cursor()
     try:
-        if target_round is not None:
-            if player_ids:
-                cur.execute(
-                    "UPDATE team_player_decisions SET draft_round=%s, status='Objetivo' WHERE board_team=%s AND player_id = ANY(%s)",
-                    (target_round, board_team, player_ids),
-                )
-            elif current_round is not None:
-                cur.execute(
-                    "UPDATE team_player_decisions SET draft_round=%s, status='Objetivo' WHERE board_team=%s AND status='Objetivo' AND COALESCE(draft_round,0)=%s",
-                    (target_round, board_team, current_round),
-                )
+        for player_id in player_ids:
+            round_raw = str(form.get(f"draft_round_{player_id}") or "").strip()
+            if not (round_raw.isdigit() and 1 <= int(round_raw) <= 10):
+                continue
+            target_round = int(round_raw)
+            cur.execute(
+                "UPDATE team_player_decisions SET draft_round=%s, status='Objetivo' WHERE board_team=%s AND player_id=%s",
+                (target_round, board_team, player_id),
+            )
         conn.commit()
     except Exception:
         conn.rollback()
