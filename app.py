@@ -1501,6 +1501,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     conn = get_conn()
     cur = conn.cursor()
+    objective_ids = set()
 
     if tab == "database":
         sql = f"""
@@ -1511,6 +1512,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         """
         cur.execute(sql)
         players = cur.fetchall()
+        cur.execute("SELECT player_id FROM team_player_decisions WHERE board_team=%s AND status='Objetivo'", (board_team,))
+        objective_ids = {row[0] for row in cur.fetchall()}
     elif tab == "newplayers":
         sql = """
             SELECT id, COALESCE(dorsal,''), name, COALESCE(position,''), COALESCE(estimated_level,''), COALESCE(fit_level,''), COALESCE(scout_status,'Seguimiento'), COALESCE(notes,'')
@@ -1572,13 +1575,20 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         for pid, name, team, position, status, notes in players:
             dorsal = _extract_dorsal_from_notes(notes)
             clean_notes = _clean_internal_notes(notes)
-            search_blob = " ".join([dorsal, name or "", team or "", position or "", status or "", clean_notes or ""])
+            is_preselected = pid in objective_ids
+            search_blob = " ".join([dorsal, name or "", team or "", position or "", status or "", clean_notes or "", "preseleccionada" if is_preselected else ""])
+            preselected_badge = f" <span class='pill {status_class('Objetivo')}'>Preseleccionada</span>" if is_preselected else ""
+            add_button_html = (
+                "<button class='btn btn-secondary action-btn' type='button' disabled>Ya preseleccionada</button>"
+                if is_preselected
+                else f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>"
+            )
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}?from=/player/{pid}'>Editar</a>",
-                f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
+                add_button_html,
                 f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
-            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(dorsal)}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(clean_notes)}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
+            rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(dorsal)}</td><td>{html.escape(name or '')}{preselected_badge}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(clean_notes)}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='8' class='muted'>No hay jugadoras.</td></tr>"
         bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'><button class='btn btn-warning' type='submit'>Añadir a preselección</button><a class='btn btn-success' href='/export?tab=database'>Exportar Excel</a><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'></button></div>"
