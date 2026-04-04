@@ -1575,7 +1575,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         rows = ""
         for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
-            search_blob = " ".join([name or "", team or "", position or "", decision_status or "", notes or ""])
+            dorsal_match = re.search(r"\[DORSAL:(\d+)\]", notes or "")
+            dorsal = dorsal_match.group(1) if dorsal_match else ""
+            clean_notes = _clean_internal_notes(notes)
+            search_blob = " ".join([dorsal, name or "", team or "", position or "", decision_status or "", clean_notes or ""])
             round_display = draft_round if draft_round else ""
             actions = [f"<a class='btn btn-light action-btn' href='/edit/{pid}?from=/player/{pid}'>Editar</a>"]
             if tab == "objectives":
@@ -1596,9 +1599,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             round_html = f"<span class='round-pill {round_class}'>{draft_round}</span>" if draft_round else ""
             order_html = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
             select_cell = f"<input type='checkbox' name='selected_player_ids' value='{pid}'>" if tab == "objectives" else ""
-            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{select_cell}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(_clean_internal_notes(notes))}</td><td>{actions_html}</td></tr>"
+            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{select_cell}</td><td>{html.escape(dorsal)}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(clean_notes)}</td><td>{actions_html}</td></tr>"
         if not rows:
-            rows = "<tr><td colspan='9' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
+            rows = "<tr><td colspan='10' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
         save_all = ""
         
         if tab == "objectives":
@@ -1612,9 +1615,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "</div>"
             )
 
-            table_html = f"<form method='post'>{bulk_actions}<table><thead><tr><th><input id='selectAllObjectives' type='checkbox' onclick='toggleSelectAllSelected(this)'></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
+            table_html = f"<form method='post'>{bulk_actions}<table><thead><tr><th><input id='selectAllObjectives' type='checkbox' onclick='toggleSelectAllSelected(this)'></th><th>#</th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
         else:
-            table_html = f"<table><thead><tr><th></th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+            table_html = f"<table><thead><tr><th></th><th>#</th><th>{head('name','Nombre')}</th><th>{head('team','Equipo actual')}</th><th>{head('position','Posición')}</th><th>{head('decision_status','Estado')}</th><th>{head('draft_round','Ronda')}</th><th>Orden</th><th>Notas</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
 
     if tab == "draftday":
         draft_state = get_draftday_state(board_team)
