@@ -504,28 +504,6 @@ function toggleSelectAllDraftday(source){
  boxes.forEach((cb)=>{ cb.checked = !!source.checked; });
 }
 
-function prepareDraftdayBulkMove(){
- const form=document.getElementById('draftdayBulkMoveForm');
- if(!form) return true;
- form.querySelectorAll("input[name='player_move']").forEach((el)=>el.remove());
- const boxes=document.querySelectorAll("input[name='draftday_selected_ids']:checked");
- if(!boxes.length){
-   alert('Selecciona al menos una jugadora para mover.');
-   return false;
- }
- boxes.forEach((cb)=>{
-   const pid=(cb.value || '').trim();
-   const select=document.getElementById(`draft-round-player-${pid}`);
-   if(!pid || !select || !select.value) return;
-   const hidden=document.createElement('input');
-   hidden.type='hidden';
-   hidden.name='player_move';
-   hidden.value=`${pid}:${select.value}`;
-   form.appendChild(hidden);
- });
- return form.querySelectorAll("input[name='player_move']").length > 0;
-}
-
 document.addEventListener('submit', async (e) => {
  const form = e.target;
  if(!form || !form.classList || !form.classList.contains('draftday-ajax-form')) return;
@@ -1673,11 +1651,9 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
         rows = ""
         for pid, name, team, position, player_status, notes, decision_status, draft_round, round_order in players:
             order_badge = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
-            selected_round = draft_round or current_round
             move_round_options = "".join([
-                f"<option value='{i}' {'selected' if selected_round == i else ''}>{i}</option>" for i in range(1, 11)
+                f"<option value='{i}' {'selected' if (draft_round or current_round) == i else ''}>{i}</option>" for i in range(1, 11)
             ])
-            move_select_html = f"<select id='draft-round-player-{pid}' name='draft_round' style='width:78px;padding:6px 8px;'>{move_round_options}</select>"
             actions_html = (
                 f"<div class='draftday-actions'>"
                 f"<form class='inline-form draftday-ajax-form' action='/decision/{pid}?current_round={current_round}' method='post' data-fallback-href='/?tab=draftday&current_round={current_round}'>"
@@ -1701,7 +1677,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<form class='inline-form' action='/draftday-move-round/{pid}' method='post'>"
                 f"<input type='hidden' name='current_round_form' value='{current_round}'>"
                 f"<input type='hidden' name='round_order' value='{round_order or ''}'>"
-                f"{move_select_html}"
+                f"<select name='draft_round' style='width:78px;padding:6px 8px;'>{move_round_options}</select>"
                 f"<button class='btn btn-light action-btn' type='submit'>Mover</button></form>"
                 f"</div>"
             )
@@ -1709,7 +1685,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             risk_text = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
             note_short = html.escape(_clean_internal_notes(notes))
             dorsal = _extract_dorsal_from_notes(notes)
-            rows += f"<tr data-draftday-row='1' data-player-id='{pid}'><td><input type='checkbox' name='draftday_selected_ids' value='{pid}' form='draftdayBulkMoveForm'></td><td class='dorsal-mini'>{html.escape(dorsal)}</td><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td>{html.escape(team or '')}</td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
+            rows += f"<tr data-draftday-row='1'><td><input type='checkbox' name='draftday_selected_ids' value='{pid}' form='draftdayBulkMoveForm'></td><td class='dorsal-mini'>{html.escape(dorsal)}</td><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td>{html.escape(team or '')}</td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='8' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
@@ -1769,14 +1745,16 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "</div>"
             )
 
-        bulk_form = f"<form id='draftdayBulkMoveForm' method='post' action='/draftday-bulk-move' onsubmit='return prepareDraftdayBulkMove();'></form>"
+        bulk_move_options = "".join([f"<option value='{i}'>{i}</option>" for i in range(1,11)])
+        bulk_form = f"<form id='draftdayBulkMoveForm' method='post' action='/draftday-bulk-move'></form>"
         bulk_actions = (
             f"<div class='draftday-actions' style='margin:0 0 12px 0;'>"
             f"<input type='hidden' name='current_round_form' value='{current_round}' form='draftdayBulkMoveForm'>"
-            f"<button class='btn btn-light action-btn' type='submit' form='draftdayBulkMoveForm'>Mover seleccionadas</button>"
+            f"<select name='draft_round' style='width:96px;padding:6px 8px;' form='draftdayBulkMoveForm'>{bulk_move_options}</select>"
+            f"<button class='btn btn-light action-btn' type='submit' form='draftdayBulkMoveForm'>Mover todas</button>"
             f"</div>"
         )
-        table_html = f"{bulk_form}{bulk_actions}<table class='draftday-table'><thead><tr><th><input type='checkbox' onclick='toggleSelectAllDraftday(this)'></th><th>#</th><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>"
+        table_html = f"{bulk_form}{bulk_actions}<table class='draftday-table'><thead><tr><th><input type='checkbox' onclick='toggleSelectAllDraftday(this)'></th><th>#</th><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}"
         all_board_html = (
             "<form class='allboard-toolbar' method='get' action='/'>"
             "<input type='hidden' name='tab' value='draftday'>"
@@ -2749,36 +2727,39 @@ async def draftday_move_round(player_id: int, request: Request, draft_round: str
 
 
 @app.post("/draftday-bulk-move")
-async def draftday_bulk_move(request: Request, current_round_form: str = Form("")):
+async def draftday_bulk_move(request: Request, draft_round: str = Form(""), current_round_form: str = Form("")):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
 
+    target_round = int(draft_round) if str(draft_round).isdigit() and 1 <= int(draft_round) <= 10 else None
     current_round = int(current_round_form) if str(current_round_form).isdigit() and 1 <= int(current_round_form) <= 10 else None
 
     form = await request.form()
-    raw_moves = form.getlist("player_move")
-    moves = []
-    for value in raw_moves:
+    raw_ids = form.getlist("draftday_selected_ids")
+    player_ids = []
+    for value in raw_ids:
         try:
-            player_id_text, round_text = str(value).split(":", 1)
-            player_id = int(player_id_text.strip())
-            target_round = int(round_text.strip())
-            if 1 <= target_round <= 10:
-                moves.append((player_id, target_round))
+            player_ids.append(int(str(value).strip()))
         except Exception:
             pass
 
     conn = get_conn()
     cur = conn.cursor()
     try:
-        for player_id, target_round in moves:
-            cur.execute(
-                "UPDATE team_player_decisions SET draft_round=%s, status='Objetivo' WHERE board_team=%s AND player_id=%s",
-                (target_round, board_team, player_id),
-            )
+        if target_round is not None:
+            if player_ids:
+                cur.execute(
+                    "UPDATE team_player_decisions SET draft_round=%s, status='Objetivo' WHERE board_team=%s AND player_id = ANY(%s)",
+                    (target_round, board_team, player_ids),
+                )
+            elif current_round is not None:
+                cur.execute(
+                    "UPDATE team_player_decisions SET draft_round=%s, status='Objetivo' WHERE board_team=%s AND status='Objetivo' AND COALESCE(draft_round,0)=%s",
+                    (target_round, board_team, current_round),
+                )
         conn.commit()
     except Exception:
         conn.rollback()
