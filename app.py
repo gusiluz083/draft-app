@@ -1685,7 +1685,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             risk_text = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
             note_short = html.escape(_clean_internal_notes(notes))
             dorsal = _extract_dorsal_from_notes(notes)
-            rows += f"<tr data-draftday-row='1'><td><input type='checkbox' name='draftday_selected_ids' value='{pid}'></td><td class='dorsal-mini'>{html.escape(dorsal)}</td><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td>{html.escape(team or '')}</td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
+            rows += f"<tr data-draftday-row='1'><td><input type='checkbox' name='draftday_selected_ids' value='{pid}' form='draftdayBulkMoveForm'></td><td class='dorsal-mini'>{html.escape(dorsal)}</td><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td>{html.escape(team or '')}</td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='8' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
 
@@ -1746,14 +1746,15 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
 
         bulk_move_options = "".join([f"<option value='{i}'>{i}</option>" for i in range(1,11)])
+        bulk_form = f"<form id='draftdayBulkMoveForm' method='post' action='/draftday-bulk-move'></form>"
         bulk_actions = (
             f"<div class='draftday-actions' style='margin:0 0 12px 0;'>"
-            f"<input type='hidden' name='current_round_form' value='{current_round}'>"
-            f"<select name='draft_round' style='width:96px;padding:6px 8px;'>{bulk_move_options}</select>"
-            f"<button class='btn btn-light action-btn' type='submit' formaction='/draftday-bulk-move' formmethod='post'>Mover todas</button>"
+            f"<input type='hidden' name='current_round_form' value='{current_round}' form='draftdayBulkMoveForm'>"
+            f"<select name='draft_round' style='width:96px;padding:6px 8px;' form='draftdayBulkMoveForm'>{bulk_move_options}</select>"
+            f"<button class='btn btn-light action-btn' type='submit' form='draftdayBulkMoveForm'>Mover todas</button>"
             f"</div>"
         )
-        table_html = f"<form method='post'>{bulk_actions}<table class='draftday-table'><thead><tr><th><input type='checkbox' onclick='toggleSelectAllDraftday(this)'></th><th>#</th><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}</form>"
+        table_html = f"{bulk_form}{bulk_actions}<table class='draftday-table'><thead><tr><th><input type='checkbox' onclick='toggleSelectAllDraftday(this)'></th><th>#</th><th>Jugadora</th><th>Equipo actual</th><th>Pos</th><th>Ord</th><th>Riesgo</th><th>Acciones</th></tr></thead><tbody>{rows}</tbody></table>{bulk_actions}"
         all_board_html = (
             "<form class='allboard-toolbar' method='get' action='/'>"
             "<input type='hidden' name='tab' value='draftday'>"
