@@ -76,6 +76,20 @@ def _pick_row_value(row: dict, *keys: str) -> str:
             return value.strip()
     return ""
 
+def _extract_dorsal_from_notes(value: str) -> str:
+    text = value or ""
+    m = re.search(r"\[DORSAL:([^\]]+)\]", text, flags=re.IGNORECASE)
+    return (m.group(1).strip() if m else "")
+
+
+def _clean_internal_notes(value: str) -> str:
+    text = (value or "")
+    text = re.sub(r"\s*\[DORSAL:[^\]]+\]", "", text)
+    text = re.sub(r"\s*\[IMPORT_JUGADORAS_CSV\]", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -1527,9 +1541,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
     if tab == "database":
         rows = ""
         for pid, name, team, position, status, notes in players:
-            dorsal_match = re.search(r"\[DORSAL:(\d+)\]", notes or "")
-            dorsal = dorsal_match.group(1) if dorsal_match else ""
-            clean_notes = re.sub(r"\s*\[DORSAL:\d+\]", "", notes or "").strip()
+            dorsal = _extract_dorsal_from_notes(notes)
+            clean_notes = _clean_internal_notes(notes)
             search_blob = " ".join([dorsal, name or "", team or "", position or "", status or "", clean_notes or ""])
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}?from=/player/{pid}'>Editar</a>",
@@ -1583,7 +1596,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             round_html = f"<span class='round-pill {round_class}'>{draft_round}</span>" if draft_round else ""
             order_html = f"<span class='round-pill'>{round_order}</span>" if round_order else ""
             select_cell = f"<input type='checkbox' name='selected_player_ids' value='{pid}'>" if tab == "objectives" else ""
-            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{select_cell}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(notes or '')}</td><td>{actions_html}</td></tr>"
+            rows += f"<tr class='row-{status_class(decision_status)}' data-player-row='1' data-status='{html.escape(decision_status)}' data-round='{html.escape(str(draft_round or ""))}' data-search='{html.escape(search_blob)}'><td>{select_cell}</td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(decision_status)}'>{html.escape(decision_status)}</span></td><td>{round_html}</td><td>{order_html}</td><td>{html.escape(_clean_internal_notes(notes))}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras en esta pestaña.</td></tr>"
         save_all = ""
@@ -1657,9 +1670,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             )
             pos_short = {"Portera":"POR","Defensa":"DEF","Medio":"MED","Delantera":"DEL"}.get(position, (position or "")[:3].upper())
             risk_text = enhanced_risk_level(picks_remaining, round_order, position, position_pressure)
-            note_short = html.escape(notes or "")
-            dorsal_match = re.search(r"\[DORSAL:(\d+)\]", notes or "")
-            dorsal = dorsal_match.group(1) if dorsal_match else ""
+            note_short = html.escape(_clean_internal_notes(notes))
+            dorsal = _extract_dorsal_from_notes(notes)
             rows += f"<tr data-draftday-row='1'><td class='dorsal-mini'>{html.escape(dorsal)}</td><td class='name-col'>{html.escape(name or '')}<span class='note-mini'>{note_short}</span></td><td>{html.escape(team or '')}</td><td class='pos-mini'>{html.escape(pos_short)}</td><td class='ord-mini'>{order_badge}</td><td class='risk-mini'>{risk_text}</td><td>{actions_html}</td></tr>"
         if not rows:
             rows = "<tr><td colspan='7' class='muted'>No hay jugadoras marcadas para esta ronda.</td></tr>"
@@ -1942,7 +1954,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
                 f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
-            rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='new_player_ids' value='{pid}'></td><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
+            rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='new_player_ids' value='{pid}'></td><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(_clean_internal_notes(notes))}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
 
@@ -3004,22 +3016,51 @@ def delete_player(player_id: int, request: Request):
 def import_csv(request: Request, file: UploadFile = File(...)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
-    reader = csv.DictReader(file.file.read().decode("utf-8-sig").splitlines())
+
+    rows = _read_csv_rows(file)
     conn = get_conn()
     cur = conn.cursor()
-    for row in reader:
-        name = (row.get("name") or row.get("nombre") or "").strip()
-        team = (row.get("team") or row.get("equipo") or "").strip()
-        position = (row.get("position") or row.get("posicion") or row.get("posición") or "").strip()
-        status = (row.get("status") or row.get("estado") or "Disponible").strip() or "Disponible"
-        notes = (row.get("notes") or row.get("notas") or "").strip()
-        if name:
-            cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s)", (name, team, position, status, notes))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return RedirectResponse("/?tab=database", status_code=303)
+    try:
+        cur.execute("DELETE FROM team_player_decisions WHERE player_id IN (SELECT id FROM players WHERE COALESCE(notes,'') LIKE %s)", ("%[IMPORT_JUGADORAS_CSV]%",))
+        cur.execute("DELETE FROM players WHERE COALESCE(notes,'') LIKE %s", ("%[IMPORT_JUGADORAS_CSV]%",))
 
+        for row in rows:
+            dorsal = _pick_row_value(row, "dorsal", "#", "numero", "nº", "no", "n")
+            full_name = _pick_row_value(row, "nombre completo", "nombre y apellidos", "name", "jugadora")
+            if not full_name:
+                first_name = _pick_row_value(row, "nombre")
+                last_name = _pick_row_value(row, "apellidos")
+                full_name = " ".join([part for part in [first_name, last_name] if part]).strip()
+            team = _pick_row_value(row, "origen", "team", "equipo actual", "equipo", "club", "club / procedencia", "club/procedencia", "procedencia")
+            position = _normalize_new_player_position(_pick_row_value(row, "position", "posicion", "posición", "rol", "role"))
+            comunidad = _pick_row_value(row, "comunidad")
+            extra_notes = _pick_row_value(row, "notes", "notas", "observaciones", "observacion")
+            visible_notes = []
+            if comunidad:
+                visible_notes.append(f"Comunidad: {comunidad}")
+            if extra_notes:
+                visible_notes.append(extra_notes)
+            visible_notes_text = " | ".join(visible_notes).strip()
+            internal_notes = "[IMPORT_JUGADORAS_CSV]"
+            if dorsal:
+                internal_notes += f" [DORSAL:{dorsal}]"
+            if visible_notes_text:
+                internal_notes += f" {visible_notes_text}"
+
+            if full_name:
+                cur.execute(
+                    "INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s)",
+                    (full_name.strip(), team.strip(), position.strip(), "Disponible", internal_notes.strip())
+                )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse("/?tab=database", status_code=303)
 
 
 @app.post("/import-newplayers")
@@ -3086,9 +3127,8 @@ def export_excel(request: Request, tab: str = "database"):
         raw_rows = cur.fetchall()
         rows = []
         for name, team, position, status, notes in raw_rows:
-            dorsal_match = re.search(r"\[DORSAL:(\d+)\]", notes or "")
-            dorsal = dorsal_match.group(1) if dorsal_match else ""
-            clean_notes = re.sub(r"\s*\[DORSAL:\d+\]", "", notes or "").strip()
+            dorsal = _extract_dorsal_from_notes(notes)
+            clean_notes = _clean_internal_notes(notes)
             rows.append((dorsal, name, team, position, status, clean_notes))
         headers = ["Dorsal", "Nombre", "Equipo actual", "Posición", "Estado jugadora", "Notas"]
     elif tab == "newplayers":
