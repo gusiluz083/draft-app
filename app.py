@@ -1261,7 +1261,7 @@ def render_plantilla_fichas_print(board_team: str) -> str:
                     <div>
                       <h2>Fortalezas</h2>
                       <div class='sheet-text'>{strengths_text}</div>
-                      <h2 style='margin-top:14px;'>Debilidades</h2>
+                      <h2 style='margin-top:12px;'>Debilidades</h2>
                       <div class='sheet-text'>{weaknesses_text}</div>
                     </div>
                     <div>
@@ -1290,54 +1290,92 @@ def render_plantilla_fichas_print(board_team: str) -> str:
         <style>
           body {{ background:#eef2ff; }}
           .print-toolbar {{
-            max-width:1100px; margin:18px auto 0; display:flex; gap:10px; flex-wrap:wrap;
+            max-width:900px; margin:16px auto 0; display:flex; gap:10px; flex-wrap:wrap;
             justify-content:flex-end;
           }}
           .print-sheet {{
-            width:210mm; min-height:297mm; margin:16px auto; background:#fff; box-sizing:border-box;
-            padding:16mm; border-radius:18px; box-shadow:0 14px 40px rgba(15,23,42,.10);
-            page-break-after:always; break-after:page;
+            width:210mm;
+            min-height:297mm;
+            margin:12px auto;
+            background:#fff;
+            box-sizing:border-box;
+            padding:12mm;
+            border-radius:12px;
+            box-shadow:0 8px 24px rgba(15,23,42,.08);
+            page-break-after:always;
+            break-after:page;
+            overflow:hidden;
           }}
           .print-sheet:last-child {{ page-break-after:auto; break-after:auto; }}
           .sheet-header {{
-            display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px;
+            display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;
           }}
-          .sheet-kicker {{ color:#64748b; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }}
-          .sheet-header h1 {{ margin:6px 0 0; font-size:34px; color:#142850; line-height:1.1; }}
+          .sheet-kicker {{ color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }}
+          .sheet-header h1 {{ margin:4px 0 0; font-size:24px; color:#142850; line-height:1.1; }}
           .sheet-id {{
-            padding:10px 16px; border-radius:999px; background:#eef4ff; color:#1b2f63; font-weight:800; white-space:nowrap;
+            padding:8px 12px; border-radius:999px; background:#eef4ff; color:#1b2f63; font-weight:800; white-space:nowrap;
+            font-size:12px;
           }}
-          .sheet-grid {{ display:grid; grid-template-columns:320px 1fr; gap:18px; align-items:start; }}
+          .sheet-grid {{
+            display:grid;
+            grid-template-columns:68mm 1fr;
+            gap:12px;
+            align-items:start;
+          }}
           .sheet-photo-card, .sheet-card {{
-            border:1px solid #dbe7ff; border-radius:20px; background:#f8fbff;
+            border:1px solid #dbe7ff; border-radius:14px; background:#f8fbff;
           }}
-          .sheet-photo-card {{ overflow:hidden; }}
+          .sheet-photo-card {{
+            overflow:hidden;
+            align-self:start;
+          }}
           .sheet-photo-card img {{
-            width:100%; height:430px; object-fit:cover; display:block; background:#e5e7eb;
+            width:100%;
+            height:88mm;
+            object-fit:cover;
+            object-position:center top;
+            display:block;
+            background:#e5e7eb;
           }}
-          .sheet-main {{ display:grid; gap:14px; }}
-          .sheet-card {{ padding:16px; }}
-          .sheet-card h2 {{ margin:0 0 12px; color:#142850; font-size:20px; }}
-          .sheet-stats {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
+          .sheet-main {{ display:grid; gap:10px; }}
+          .sheet-card {{ padding:12px; }}
+          .sheet-card h2 {{ margin:0 0 8px; color:#142850; font-size:16px; line-height:1.2; }}
+          .sheet-stats {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }}
           .sheet-stats.season {{ grid-template-columns:repeat(4,minmax(0,1fr)); }}
-          .sheet-stats span {{ display:block; color:#64748b; font-size:12px; margin-bottom:4px; }}
-          .sheet-stats strong {{ font-size:18px; color:#1f2937; }}
-          .sheet-text {{ white-space:pre-wrap; line-height:1.55; color:#374151; font-size:14px; }}
-          .two-col {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }}
+          .sheet-stats span {{ display:block; color:#64748b; font-size:10px; margin-bottom:3px; }}
+          .sheet-stats strong {{ font-size:14px; color:#1f2937; line-height:1.2; }}
+          .sheet-text {{ white-space:pre-wrap; line-height:1.35; color:#374151; font-size:12px; }}
+          .two-col {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
+
           @media print {{
+            @page {{ size:A4 portrait; margin:8mm; }}
             body {{ background:#fff; }}
             .print-toolbar {{ display:none !important; }}
             .print-sheet {{
-              margin:0; width:auto; min-height:auto; border-radius:0; box-shadow:none;
-              page-break-after:always; break-after:page;
+              margin:0;
+              width:auto;
+              min-height:0;
+              height:auto;
+              border-radius:0;
+              box-shadow:none;
+              padding:0;
+              page-break-after:always;
+              break-after:page;
             }}
             .print-sheet:last-child {{ page-break-after:auto; break-after:auto; }}
+            .sheet-photo-card img {{
+              height:82mm;
+            }}
+            .sheet-card h2 {{ font-size:15px; }}
+            .sheet-text {{ font-size:11px; line-height:1.3; }}
+            .sheet-stats strong {{ font-size:13px; }}
           }}
+
           @media (max-width: 960px) {{
             .print-sheet {{ width:auto; min-height:auto; margin:12px; padding:12px; }}
             .sheet-grid {{ grid-template-columns:1fr; }}
             .sheet-stats, .sheet-stats.season, .two-col {{ grid-template-columns:1fr; }}
-            .sheet-photo-card img {{ height:auto; aspect-ratio:4/5; }}
+            .sheet-photo-card img {{ height:320px; }}
           }}
         </style>
         <div class='print-toolbar'>
