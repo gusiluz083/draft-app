@@ -11,6 +11,11 @@ from fastapi import FastAPI, Form, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 import psycopg2
 import uuid
 
@@ -1175,7 +1180,7 @@ def get_plantilla_players(board_team: str):
 
 
 
-def render_plantilla_fichas_print(board_team: str) -> str:
+def build_plantilla_fichas_pdf(board_team: str) -> bytes:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -1183,7 +1188,7 @@ def render_plantilla_fichas_print(board_team: str) -> str:
         SELECT
             p.id, p.name, COALESCE(p.team, ''), COALESCE(p.position, ''), COALESCE(p.status, ''),
             COALESCE(p.notes,''), COALESCE(p.photo_url, ''), COALESCE(p.secondary_position, ''),
-            COALESCE(p.age, ''), COALESCE(p.rating, ''), COALESCE(p.dominant_foot, ''),
+            age, rating, COALESCE(p.dominant_foot, ''),
             COALESCE(p.physical_status, ''), COALESCE(p.squad_role, ''), COALESCE(p.strengths, ''),
             COALESCE(p.weaknesses, ''), COALESCE(p.staff_assessment, ''),
             COALESCE(p.season_matches, 0), COALESCE(p.season_goals, 0),
@@ -1200,24 +1205,140 @@ def render_plantilla_fichas_print(board_team: str) -> str:
     cur.close()
     conn.close()
 
-    def nice(v, fallback="-"):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title=f"Fichas plantilla {board_team}",
+        author="Draft Manager",
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "FichaTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=20,
+        leading=24,
+        textColor=colors.HexColor("#142850"),
+        spaceAfter=8,
+    )
+    kicker_style = ParagraphStyle(
+        "FichaKicker",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#64748b"),
+        spaceAfter=4,
+    )
+    label_style = ParagraphStyle(
+        "FichaLabel",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#64748b"),
+    )
+    value_style = ParagraphStyle(
+        "FichaValue",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=15,
+        textColor=colors.HexColor("#1f2937"),
+    )
+    section_title_style = ParagraphStyle(
+        "SectionTitle",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=14,
+        textColor=colors.HexColor("#142850"),
+        spaceAfter=6,
+    )
+    body_style = ParagraphStyle(
+        "FichaBody",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor("#374151"),
+    )
+    small_style = ParagraphStyle(
+        "FichaSmall",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#374151"),
+    )
+
+    def esc(v, fallback="-"):
         if v is None:
             return fallback
         s = str(v).strip()
         return html.escape(s if s else fallback)
 
-    if not rows:
-        return page(
-            f"""
-            <div style='max-width:900px;margin:40px auto;padding:24px;font-family:Arial,sans-serif;'>
-              <h1 style='margin:0 0 12px;'>Fichas de plantilla</h1>
-              <div style='color:#6b7280;'>No hay jugadoras elegidas en la plantilla de <strong>{html.escape(board_team)}</strong>.</div>
-            </div>
-            """
-        )
+    def to_local_photo_path(photo_url: str) -> str:
+        photo_url = (photo_url or "").strip()
+        if not photo_url:
+            return ""
+        if photo_url.startswith("/static/"):
+            rel = photo_url[len("/static/"):]
+            return os.path.join(STATIC_DIR, rel)
+        if photo_url.startswith("static/"):
+            rel = photo_url[len("static/"):]
+            return os.path.join(STATIC_DIR, rel)
+        return photo_url
 
-    sheets = []
-    for row in rows:
+    def metric_cell(label, value):
+        inner = [
+            [Paragraph(html.escape(str(label)), label_style)],
+            [Paragraph(esc(value), value_style)],
+        ]
+        t = Table(inner, colWidths=[56 * mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fbff")),
+            ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#dbe7ff")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        return t
+
+    def text_card(title, text):
+        card = Table(
+            [[Paragraph(html.escape(str(title)), section_title_style)],
+             [Paragraph(esc(text, "Sin registrar."), body_style)]],
+            colWidths=[84 * mm],
+        )
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fbff")),
+            ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#dbe7ff")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        return card
+
+    story = []
+
+    if not rows:
+        story.append(Paragraph("Fichas de plantilla", title_style))
+        story.append(Paragraph(f"No hay jugadoras elegidas en la plantilla de {html.escape(board_team)}.", body_style))
+        doc.build(story)
+        return buffer.getvalue()
+
+    for idx, row in enumerate(rows):
         (
             pid, name, team, position, status, notes, photo_url, secondary_position,
             age, rating, dominant_foot, physical_status, squad_role, strengths,
@@ -1225,149 +1346,82 @@ def render_plantilla_fichas_print(board_team: str) -> str:
             season_minutes
         ) = row
 
-        photo_src = html.escape(photo_url or player_photo_placeholder(name))
-        strengths_text = html.escape(strengths or "Sin registrar.")
-        weaknesses_text = html.escape(weaknesses or "Sin registrar.")
-        notes_text = html.escape(staff_assessment or notes or "Sin observaciones registradas.")
+        photo_path = to_local_photo_path(photo_url)
+        photo_cell = Paragraph("Sin foto", small_style)
+        try:
+            if photo_path:
+                img = Image(photo_path, width=58 * mm, height=74 * mm)
+                img.hAlign = "CENTER"
+                photo_cell = img
+        except Exception:
+            photo_cell = Paragraph("Foto no disponible", small_style)
 
-        sheets.append(
-            f"""
-            <section class='print-sheet'>
-              <div class='sheet-header'>
-                <div>
-                  <div class='sheet-kicker'>Gestión de Plantilla · {html.escape(board_team)}</div>
-                  <h1>{html.escape(name or '')}</h1>
-                </div>
-                <div class='sheet-id'>#{pid}</div>
-              </div>
+        story.append(Paragraph(f"Gestión de Plantilla · {html.escape(board_team)}", kicker_style))
+        story.append(Paragraph(html.escape(name or "Jugadora"), title_style))
+        story.append(Spacer(1, 3 * mm))
 
-              <div class='sheet-grid'>
-                <div class='sheet-photo-card'>
-                  <img src='{photo_src}' alt='{html.escape(name or '')}'>
-                </div>
+        left_col = Table([[photo_cell]], colWidths=[62 * mm], rowHeights=[78 * mm])
+        left_col.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fbff")),
+            ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#dbe7ff")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
 
-                <div class='sheet-main'>
-                  <div class='sheet-card'>
-                    <h2>Datos deportivos</h2>
-                    <div class='sheet-stats'>
-                      <div><span>Equipo actual</span><strong>{nice(team)}</strong></div>
-                      <div><span>Posición principal</span><strong>{nice(position)}</strong></div>
-                      <div><span>Posición secundaria</span><strong>{nice(secondary_position)}</strong></div>
-                      <div><span>Edad</span><strong>{nice(age)}</strong></div>
-                      <div><span>Nivel / media</span><strong>{nice(rating)}</strong></div>
-                      <div><span>Pierna dominante</span><strong>{nice(dominant_foot)}</strong></div>
-                    </div>
-                  </div>
+        metrics = [
+            [metric_cell("ID", pid), metric_cell("Equipo actual", team), metric_cell("Posición principal", position)],
+            [metric_cell("Posición secundaria", secondary_position), metric_cell("Edad", age if age is not None else "-"), metric_cell("Media", rating if rating is not None else "-")],
+            [metric_cell("Pierna dominante", dominant_foot), metric_cell("Estado", status), metric_cell("Estado físico", physical_status)],
+            [metric_cell("Rol", squad_role), metric_cell("Partidos", int(season_matches or 0)), metric_cell("Goles", int(season_goals or 0))],
+            [metric_cell("Asistencias", int(season_assists or 0)), metric_cell("Minutos", int(season_minutes or 0)), metric_cell(" ", " ")],
+        ]
+        right_col = Table(metrics, colWidths=[56 * mm, 56 * mm, 56 * mm])
+        right_col.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ]))
 
-                  <div class='sheet-card'>
-                    <h2>Rol y estado</h2>
-                    <div class='sheet-stats'>
-                      <div><span>Estado jugadora</span><strong>{nice(status)}</strong></div>
-                      <div><span>Estado físico</span><strong>{nice(physical_status)}</strong></div>
-                      <div><span>Rol en el equipo</span><strong>{nice(squad_role)}</strong></div>
-                    </div>
-                  </div>
+        head = Table([[left_col, right_col]], colWidths=[64 * mm, 174 * mm])
+        head.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(head)
+        story.append(Spacer(1, 5 * mm))
 
-                  <div class='sheet-card two-col'>
-                    <div>
-                      <h2>Seguimiento técnico</h2>
-                      <div class='muted-label'>Fortalezas</div>
-                      <div class='sheet-text'>{strengths_text}</div>
-                      <div class='muted-label' style='margin-top:14px;'>Debilidades</div>
-                      <div class='sheet-text'>{weaknesses_text}</div>
-                    </div>
-                    <div>
-                      <h2>Observaciones staff</h2>
-                      <div class='sheet-text'>{notes_text}</div>
-                    </div>
-                  </div>
-
-                  <div class='sheet-card'>
-                    <h2>Datos de temporada</h2>
-                    <div class='sheet-stats season'>
-                      <div><span>Partidos</span><strong>{int(season_matches or 0)}</strong></div>
-                      <div><span>Goles</span><strong>{int(season_goals or 0)}</strong></div>
-                      <div><span>Asistencias</span><strong>{int(season_assists or 0)}</strong></div>
-                      <div><span>Minutos</span><strong>{int(season_minutes or 0)}</strong></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-            """
+        cards = Table(
+            [[
+                text_card("Fortalezas", strengths or "Sin registrar."),
+                text_card("Debilidades", weaknesses or "Sin registrar."),
+            ],
+            [
+                text_card("Observaciones", staff_assessment or notes or "Sin observaciones registradas."),
+                text_card("Notas", notes or "Sin notas registradas."),
+            ]],
+            colWidths=[87 * mm, 87 * mm],
         )
+        cards.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(cards)
 
-    return page(
-        f"""
-        <style>
-          body {{ background:#eef2ff; }}
-          .print-toolbar {{
-            max-width:1100px; margin:18px auto 0; display:flex; gap:10px; flex-wrap:wrap;
-            justify-content:flex-end;
-          }}
-          .print-sheet {{
-            width:210mm; min-height:297mm; margin:16px auto; background:#fff; box-sizing:border-box;
-            padding:16mm; border-radius:18px; box-shadow:0 14px 40px rgba(15,23,42,.10);
-            page-break-after:always; break-after:page;
-          }}
-          .print-sheet:last-child {{ page-break-after:auto; break-after:auto; }}
-          .sheet-header {{
-            display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px;
-          }}
-          .sheet-kicker {{ color:#64748b; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }}
-          .sheet-header h1 {{ margin:6px 0 0; font-size:34px; color:#142850; line-height:1.1; }}
-          .sheet-id {{
-            padding:10px 16px; border-radius:999px; background:#eef4ff; color:#1b2f63; font-weight:800; white-space:nowrap;
-          }}
-          .sheet-grid {{ display:grid; grid-template-columns:320px 1fr; gap:18px; align-items:start; }}
-          .sheet-photo-card, .sheet-card {{
-            border:1px solid #dbe7ff; border-radius:20px; background:#f8fbff;
-          }}
-          .sheet-photo-card {{ overflow:hidden; }}
-          .sheet-photo-card img {{
-            width:100%; height:430px; object-fit:cover; display:block; background:#e5e7eb;
-          }}
-          .sheet-main {{ display:grid; gap:14px; }}
-          .sheet-card {{ padding:16px; }}
-          .sheet-card h2 {{ margin:0 0 12px; color:#142850; font-size:20px; }}
-          .sheet-stats {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
-          .sheet-stats.season {{ grid-template-columns:repeat(4,minmax(0,1fr)); }}
-          .sheet-stats span, .muted-label {{ display:block; color:#64748b; font-size:12px; margin-bottom:4px; }}
-          .sheet-stats strong {{ font-size:18px; color:#1f2937; }}
-          .sheet-text {{
-            white-space:pre-wrap; line-height:1.55; color:#374151; font-size:14px;
-          }}
-          .two-col {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }}
-          @media print {{
-            body {{ background:#fff; }}
-            .print-toolbar {{ display:none !important; }}
-            .print-sheet {{
-              margin:0; width:auto; min-height:auto; border-radius:0; box-shadow:none;
-              page-break-after:always; break-after:page;
-            }}
-            .print-sheet:last-child {{ page-break-after:auto; break-after:auto; }}
-          }}
-          @media (max-width: 960px) {{
-            .print-sheet {{ width:auto; min-height:auto; margin:12px; padding:12px; }}
-            .sheet-grid {{ grid-template-columns:1fr; }}
-            .sheet-stats, .sheet-stats.season, .two-col {{ grid-template-columns:1fr; }}
-            .sheet-photo-card img {{ height:auto; aspect-ratio:4/5; }}
-          }}
-        </style>
-        <div class='print-toolbar'>
-          <button class='btn btn-secondary' type='button' onclick='window.close()'>Cerrar</button>
-          <button class='btn' type='button' onclick='window.print()'>Imprimir todas las fichas</button>
-        </div>
-        {''.join(sheets)}
-        <script>
-          window.addEventListener('load', function(){{
-            setTimeout(function(){{
-              try {{ window.print(); }} catch (e) {{}}
-            }}, 300);
-          }});
-        </script>
-        """
-    )
+        if idx < len(rows) - 1:
+            story.append(PageBreak())
+
+    doc.build(story)
+    return buffer.getvalue()
+
 
 def render_plantilla_gallery(board_team: str) -> str:
     cards = []
@@ -1395,7 +1449,7 @@ def render_plantilla_gallery(board_team: str) -> str:
     return (
         "<div class='gallery-header'>"
         f"<div><h2 style='margin:0;'>Plantilla visual</h2><div class='muted'>Vista principal de 12 jugadoras para <strong>{html.escape(board_team)}</strong>. Cada tarjeta incluye acceso rápido a <strong>Ver ficha</strong> y <strong>Editar</strong>.</div></div>"
-        f"<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;'><a class='btn btn-secondary' href='/plantilla/fichas-pdf' target='_blank' rel='noopener'>Imprimir todas las fichas</a><div class='gallery-count'>12 plazas</div></div>"
+        f"<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;'><a class='btn btn-secondary' href='/plantilla/fichas-pdf'>Descargar PDF fichas</a><div class='gallery-count'>12 plazas</div></div>"
         "</div>"
         "<div class='players-grid'>" + "".join(cards) + "</div>"
     )
@@ -1489,7 +1543,7 @@ def plantilla_home(request: Request):
     return plantilla_layout(request, board_team, "plantilla", render_plantilla_gallery(board_team))
 
 
-@app.get("/plantilla/fichas-pdf", response_class=HTMLResponse)
+@app.get("/plantilla/fichas-pdf")
 def plantilla_fichas_pdf(request: Request):
     user = require_user(request)
     if not user:
@@ -1497,7 +1551,14 @@ def plantilla_fichas_pdf(request: Request):
     board_team = get_team(request)
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
-    return render_plantilla_fichas_print(board_team)
+    pdf_bytes = build_plantilla_fichas_pdf(board_team)
+    safe_team = re.sub(r"[^A-Za-z0-9_-]+", "_", board_team or "equipo").strip("_") or "equipo"
+    filename = f"fichas_plantilla_{safe_team}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @app.get("/plantilla/estadisticas", response_class=HTMLResponse)
