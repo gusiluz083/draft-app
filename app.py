@@ -1348,27 +1348,61 @@ def render_plantilla_fichas_print(board_team: str) -> str:
           .two-col {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
 
           @media print {{
-            @page {{ size:A4 portrait; margin:8mm; }}
-            body {{ background:#fff; }}
+            @page {{ size:A4 portrait; margin:10mm; }}
+            html, body {{ width:190mm; }}
+            body {{ background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
             .print-toolbar {{ display:none !important; }}
             .print-sheet {{
-              margin:0;
-              width:auto;
+              width:190mm;
               min-height:0;
-              height:auto;
+              margin:0 auto;
+              padding:0;
               border-radius:0;
               box-shadow:none;
-              padding:0;
+              overflow:visible;
               page-break-after:always;
               break-after:page;
             }}
             .print-sheet:last-child {{ page-break-after:auto; break-after:auto; }}
-            .sheet-photo-card img {{
-              height:82mm;
+            .sheet-grid {{
+              display:grid !important;
+              grid-template-columns:60mm 1fr !important;
+              gap:10px !important;
+              align-items:start !important;
             }}
-            .sheet-card h2 {{ font-size:15px; }}
-            .sheet-text {{ font-size:11px; line-height:1.3; }}
-            .sheet-stats strong {{ font-size:13px; }}
+            .sheet-photo-card {{
+              display:block !important;
+              width:60mm !important;
+            }}
+            .sheet-photo-card img {{
+              width:100% !important;
+              height:82mm !important;
+              object-fit:cover !important;
+              object-position:center top !important;
+              display:block !important;
+            }}
+            .sheet-main {{
+              display:grid !important;
+              gap:8px !important;
+            }}
+            .sheet-card {{ padding:10px !important; break-inside:avoid; }}
+            .sheet-card h2 {{ font-size:15px; margin:0 0 6px; }}
+            .sheet-stats {{
+              display:grid !important;
+              grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+              gap:6px !important;
+            }}
+            .sheet-stats.season {{
+              grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+            }}
+            .sheet-stats span {{ font-size:9px; }}
+            .sheet-stats strong {{ font-size:12px; }}
+            .sheet-text {{ font-size:11px; line-height:1.28; }}
+            .two-col {{
+              display:grid !important;
+              grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+              gap:8px !important;
+            }}
           }}
 
           @media (max-width: 960px) {{
