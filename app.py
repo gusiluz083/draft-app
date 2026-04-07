@@ -640,7 +640,7 @@ function initBoard(){
  if(clearBtn){ clearBtn.addEventListener('click', ()=>{ if(confirm('¿Vaciar la pizarra?')){ players=[]; renderPlayers(); saveState(); renderSources(); } }); }
  players = players.map(p=>{
    if(p && typeof p === 'object'){
-     const labelMap = {final:'Plantilla'};
+     const labelMap = {final:'Plantilla', objectives:'Preselección', newplayers:'Jugadoras nuevas'};
      if(!p.sourceLabel && p.sourceKey && labelMap[p.sourceKey]) p.sourceLabel = labelMap[p.sourceKey];
    }
    return p;
@@ -1174,6 +1174,201 @@ def get_plantilla_players(board_team: str):
     return players
 
 
+
+def render_plantilla_fichas_print(board_team: str) -> str:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            p.id, p.name, COALESCE(p.team, ''), COALESCE(p.position, ''), COALESCE(p.status, ''),
+            COALESCE(p.notes,''), COALESCE(p.photo_url, ''), COALESCE(p.secondary_position, ''),
+            COALESCE(p.age, ''), COALESCE(p.rating, ''), COALESCE(p.dominant_foot, ''),
+            COALESCE(p.physical_status, ''), COALESCE(p.squad_role, ''), COALESCE(p.strengths, ''),
+            COALESCE(p.weaknesses, ''), COALESCE(p.staff_assessment, ''),
+            COALESCE(p.season_matches, 0), COALESCE(p.season_goals, 0),
+            COALESCE(p.season_assists, 0), COALESCE(p.season_minutes, 0)
+        FROM team_player_decisions d
+        JOIN players p ON p.id = d.player_id
+        WHERE d.board_team = %s AND d.status = 'Elegida'
+        ORDER BY COALESCE(d.draft_round, 999), COALESCE(d.round_order, 999), p.name ASC
+        LIMIT 12
+        """,
+        (board_team,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    def nice(v, fallback="-"):
+        if v is None:
+            return fallback
+        s = str(v).strip()
+        return html.escape(s if s else fallback)
+
+    if not rows:
+        return page(
+            f"""
+            <div style='max-width:900px;margin:40px auto;padding:24px;font-family:Arial,sans-serif;'>
+              <h1 style='margin:0 0 12px;'>Fichas de plantilla</h1>
+              <div style='color:#6b7280;'>No hay jugadoras elegidas en la plantilla de <strong>{html.escape(board_team)}</strong>.</div>
+            </div>
+            """
+        )
+
+    sheets = []
+    for row in rows:
+        (
+            pid, name, team, position, status, notes, photo_url, secondary_position,
+            age, rating, dominant_foot, physical_status, squad_role, strengths,
+            weaknesses, staff_assessment, season_matches, season_goals, season_assists,
+            season_minutes
+        ) = row
+
+        photo_src = html.escape(photo_url or player_photo_placeholder(name))
+        strengths_text = html.escape(strengths or "Sin registrar.")
+        weaknesses_text = html.escape(weaknesses or "Sin registrar.")
+        notes_text = html.escape(staff_assessment or notes or "Sin observaciones registradas.")
+
+        sheets.append(
+            f"""
+            <section class='print-sheet'>
+              <div class='sheet-header'>
+                <div>
+                  <div class='sheet-kicker'>Gestión de Plantilla · {html.escape(board_team)}</div>
+                  <h1>{html.escape(name or '')}</h1>
+                </div>
+                <div class='sheet-id'>#{pid}</div>
+              </div>
+
+              <div class='sheet-grid'>
+                <div class='sheet-photo-card'>
+                  <img src='{photo_src}' alt='{html.escape(name or '')}'>
+                </div>
+
+                <div class='sheet-main'>
+                  <div class='sheet-card'>
+                    <h2>Datos deportivos</h2>
+                    <div class='sheet-stats'>
+                      <div><span>Equipo actual</span><strong>{nice(team)}</strong></div>
+                      <div><span>Posición principal</span><strong>{nice(position)}</strong></div>
+                      <div><span>Posición secundaria</span><strong>{nice(secondary_position)}</strong></div>
+                      <div><span>Edad</span><strong>{nice(age)}</strong></div>
+                      <div><span>Nivel / media</span><strong>{nice(rating)}</strong></div>
+                      <div><span>Pierna dominante</span><strong>{nice(dominant_foot)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div class='sheet-card'>
+                    <h2>Rol y estado</h2>
+                    <div class='sheet-stats'>
+                      <div><span>Estado jugadora</span><strong>{nice(status)}</strong></div>
+                      <div><span>Estado físico</span><strong>{nice(physical_status)}</strong></div>
+                      <div><span>Rol en el equipo</span><strong>{nice(squad_role)}</strong></div>
+                    </div>
+                  </div>
+
+                  <div class='sheet-card two-col'>
+                    <div>
+                      <h2>Seguimiento técnico</h2>
+                      <div class='muted-label'>Fortalezas</div>
+                      <div class='sheet-text'>{strengths_text}</div>
+                      <div class='muted-label' style='margin-top:14px;'>Debilidades</div>
+                      <div class='sheet-text'>{weaknesses_text}</div>
+                    </div>
+                    <div>
+                      <h2>Observaciones staff</h2>
+                      <div class='sheet-text'>{notes_text}</div>
+                    </div>
+                  </div>
+
+                  <div class='sheet-card'>
+                    <h2>Datos de temporada</h2>
+                    <div class='sheet-stats season'>
+                      <div><span>Partidos</span><strong>{int(season_matches or 0)}</strong></div>
+                      <div><span>Goles</span><strong>{int(season_goals or 0)}</strong></div>
+                      <div><span>Asistencias</span><strong>{int(season_assists or 0)}</strong></div>
+                      <div><span>Minutos</span><strong>{int(season_minutes or 0)}</strong></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+            """
+        )
+
+    return page(
+        f"""
+        <style>
+          body {{ background:#eef2ff; }}
+          .print-toolbar {{
+            max-width:1100px; margin:18px auto 0; display:flex; gap:10px; flex-wrap:wrap;
+            justify-content:flex-end;
+          }}
+          .print-sheet {{
+            width:210mm; min-height:297mm; margin:16px auto; background:#fff; box-sizing:border-box;
+            padding:16mm; border-radius:18px; box-shadow:0 14px 40px rgba(15,23,42,.10);
+            page-break-after:always; break-after:page;
+          }}
+          .print-sheet:last-child {{ page-break-after:auto; break-after:auto; }}
+          .sheet-header {{
+            display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px;
+          }}
+          .sheet-kicker {{ color:#64748b; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }}
+          .sheet-header h1 {{ margin:6px 0 0; font-size:34px; color:#142850; line-height:1.1; }}
+          .sheet-id {{
+            padding:10px 16px; border-radius:999px; background:#eef4ff; color:#1b2f63; font-weight:800; white-space:nowrap;
+          }}
+          .sheet-grid {{ display:grid; grid-template-columns:320px 1fr; gap:18px; align-items:start; }}
+          .sheet-photo-card, .sheet-card {{
+            border:1px solid #dbe7ff; border-radius:20px; background:#f8fbff;
+          }}
+          .sheet-photo-card {{ overflow:hidden; }}
+          .sheet-photo-card img {{
+            width:100%; height:430px; object-fit:cover; display:block; background:#e5e7eb;
+          }}
+          .sheet-main {{ display:grid; gap:14px; }}
+          .sheet-card {{ padding:16px; }}
+          .sheet-card h2 {{ margin:0 0 12px; color:#142850; font-size:20px; }}
+          .sheet-stats {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
+          .sheet-stats.season {{ grid-template-columns:repeat(4,minmax(0,1fr)); }}
+          .sheet-stats span, .muted-label {{ display:block; color:#64748b; font-size:12px; margin-bottom:4px; }}
+          .sheet-stats strong {{ font-size:18px; color:#1f2937; }}
+          .sheet-text {{
+            white-space:pre-wrap; line-height:1.55; color:#374151; font-size:14px;
+          }}
+          .two-col {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }}
+          @media print {{
+            body {{ background:#fff; }}
+            .print-toolbar {{ display:none !important; }}
+            .print-sheet {{
+              margin:0; width:auto; min-height:auto; border-radius:0; box-shadow:none;
+              page-break-after:always; break-after:page;
+            }}
+            .print-sheet:last-child {{ page-break-after:auto; break-after:auto; }}
+          }}
+          @media (max-width: 960px) {{
+            .print-sheet {{ width:auto; min-height:auto; margin:12px; padding:12px; }}
+            .sheet-grid {{ grid-template-columns:1fr; }}
+            .sheet-stats, .sheet-stats.season, .two-col {{ grid-template-columns:1fr; }}
+            .sheet-photo-card img {{ height:auto; aspect-ratio:4/5; }}
+          }}
+        </style>
+        <div class='print-toolbar'>
+          <button class='btn btn-secondary' type='button' onclick='window.close()'>Cerrar</button>
+          <button class='btn' type='button' onclick='window.print()'>Imprimir todas las fichas</button>
+        </div>
+        {''.join(sheets)}
+        <script>
+          window.addEventListener('load', function(){{
+            setTimeout(function(){{
+              try {{ window.print(); }} catch (e) {{}}
+            }}, 300);
+          }});
+        </script>
+        """
+    )
+
 def render_plantilla_gallery(board_team: str) -> str:
     cards = []
     for player in get_plantilla_players(board_team):
@@ -1200,7 +1395,7 @@ def render_plantilla_gallery(board_team: str) -> str:
     return (
         "<div class='gallery-header'>"
         f"<div><h2 style='margin:0;'>Plantilla visual</h2><div class='muted'>Vista principal de 12 jugadoras para <strong>{html.escape(board_team)}</strong>. Cada tarjeta incluye acceso rápido a <strong>Ver ficha</strong> y <strong>Editar</strong>.</div></div>"
-        f"<div class='gallery-count'>12 plazas</div>"
+        f"<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;'><a class='btn btn-secondary' href='/plantilla/fichas-pdf' target='_blank' rel='noopener'>Imprimir todas las fichas</a><div class='gallery-count'>12 plazas</div></div>"
         "</div>"
         "<div class='players-grid'>" + "".join(cards) + "</div>"
     )
@@ -1292,6 +1487,17 @@ def plantilla_home(request: Request):
     if not board_team:
         return RedirectResponse("/select-team", status_code=303)
     return plantilla_layout(request, board_team, "plantilla", render_plantilla_gallery(board_team))
+
+
+@app.get("/plantilla/fichas-pdf", response_class=HTMLResponse)
+def plantilla_fichas_pdf(request: Request):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    board_team = get_team(request)
+    if not board_team:
+        return RedirectResponse("/select-team", status_code=303)
+    return render_plantilla_fichas_print(board_team)
 
 
 @app.get("/plantilla/estadisticas", response_class=HTMLResponse)
@@ -1389,8 +1595,8 @@ def render_board_module_body(board_team: str) -> str:
  window.clearBoardPlayers=function(){state=[]; render();};
  function renderSources(id, items){const box=document.getElementById(id); if(!items.length){box.innerHTML='<div class="board-empty">Sin jugadoras disponibles.</div>'; return;} box.innerHTML=items.map(item=>`<div class="board-source-item"><div><strong>${esc(item.name)}</strong><span class="mini-meta">${esc(item.position||'')}</span></div><button type="button" class="btn btn-secondary action-btn" data-name="${esc(item.name)}">Añadir</button></div>`).join(''); box.querySelectorAll('[data-name]').forEach(btn=>btn.addEventListener('click',()=>{window.addBoardPlayer(btn.dataset.name || '');}));}
  renderSources('boardSourceFinal', available.final || []);
- 
- 
+ renderSources('boardSourceObjectives', available.objectives || []);
+ renderSources('boardSourceNew', available.newplayers || []);
  render();
 })();
 </script>"""
@@ -2037,8 +2243,8 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
  window.clearBoardPlayers=function(){state=[]; render();};
  function renderSources(id, items){const box=document.getElementById(id); if(!items.length){box.innerHTML='<div class="board-empty">Sin jugadoras disponibles.</div>'; return;} box.innerHTML=items.map(item=>`<div class="board-source-item"><div><strong>${esc(item.name)}</strong><span class="mini-meta">${esc(item.position||'')}</span></div><button type="button" class="btn btn-secondary action-btn" data-name="${esc(item.name)}">Añadir</button></div>`).join(''); box.querySelectorAll('[data-name]').forEach(btn=>btn.addEventListener('click',()=>{window.addBoardPlayer(btn.dataset.name || '');}));}
  renderSources('boardSourceFinal', available.final || []);
- 
- 
+ renderSources('boardSourceObjectives', available.objectives || []);
+ renderSources('boardSourceNew', available.newplayers || []);
  render();
 })();
 </script>"""
