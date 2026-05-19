@@ -78,6 +78,370 @@ def _pick_row_value(row: dict, *keys: str) -> str:
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# =========================
+# TRYOUTS - módulo ligero
+# =========================
+TRYOUTS_FILE = os.path.join(BASE_DIR, "tryouts_data.json")
+
+DEFAULT_TRYOUTS = [
+    {"name": "Laia Jordán", "position": "Defensa", "number": 2},
+    {"name": "Miriam Crespo", "position": "Defensa", "number": 3},
+    {"name": "Laia Crespo", "position": "Defensa", "number": 4},
+    {"name": "Mónica López", "position": "Medio", "number": 5},
+    {"name": "Mar Garcia-Quijada", "position": "Medio", "number": 6},
+    {"name": "Esther Solà", "position": "Defensa", "number": 7},
+    {"name": "Yolanda Bonnin", "position": "Delantera", "number": 8},
+    {"name": "Alexandra Giró", "position": "Medio", "number": 9},
+    {"name": "Yesenia Ortiz", "position": "Delantera", "number": 10},
+    {"name": "Ari Ramos", "position": "Medio", "number": 11},
+    {"name": "Verónica Portillo", "position": "Medio", "number": 12},
+    {"name": "Maika Nchana", "position": "Delantera", "number": 13},
+    {"name": "Morena Maria Gianfico", "position": "Delantera", "number": 14},
+    {"name": "Teresa Penzo", "position": "Medio", "number": 15},
+    {"name": "Alessia D'angelo", "position": "Defensa", "number": 16},
+    {"name": "Gabriella Langella", "position": "Medio", "number": 17},
+]
+
+def _tryouts_defaults():
+    data = []
+    for idx, p in enumerate(DEFAULT_TRYOUTS, start=1):
+        item = dict(p)
+        item["id"] = idx
+        item["con"] = 0
+        item["pre"] = 0
+        item["ctl"] = 0
+        item["vel"] = 0
+        item["fis"] = 0
+        item["staff"] = 0
+        item["favorite"] = False
+        item["priority"] = ""
+        item["notes"] = ""
+        data.append(item)
+    return data
+
+def load_tryouts():
+    if not os.path.exists(TRYOUTS_FILE):
+        data = _tryouts_defaults()
+        save_tryouts(data)
+        return data
+    try:
+        with open(TRYOUTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            raise ValueError("tryouts_data.json no contiene una lista")
+    except Exception:
+        data = _tryouts_defaults()
+        save_tryouts(data)
+
+    defaults_by_number = {p["number"]: p for p in _tryouts_defaults()}
+    normalized = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        number = int(item.get("number") or 0)
+        base = defaults_by_number.get(number, {})
+        merged = dict(base)
+        merged.update(item)
+        merged["id"] = int(merged.get("id") or number or len(normalized) + 1)
+        merged["number"] = number or int(merged.get("id") or len(normalized) + 1)
+        for key in ("con", "pre", "ctl", "vel", "fis", "staff"):
+            try:
+                merged[key] = max(0, min(10, float(merged.get(key) or 0)))
+            except Exception:
+                merged[key] = 0
+        merged["favorite"] = bool(merged.get("favorite"))
+        merged["priority"] = (merged.get("priority") or "").strip()
+        merged["notes"] = (merged.get("notes") or "").strip()
+        normalized.append(merged)
+
+    existing_numbers = {p.get("number") for p in normalized}
+    for p in _tryouts_defaults():
+        if p["number"] not in existing_numbers:
+            normalized.append(p)
+
+    return sorted(normalized, key=lambda x: int(x.get("number") or 999))
+
+def save_tryouts(data):
+    with open(TRYOUTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data if isinstance(data, list) else [], f, ensure_ascii=False, indent=2)
+
+def tryout_total(player: dict) -> float:
+    values = [float(player.get(k) or 0) for k in ("con", "pre", "ctl", "vel", "fis")]
+    return round(sum(values) / 5, 2)
+
+def tryout_final(player: dict) -> float:
+    pruebas = tryout_total(player)
+    staff = float(player.get("staff") or 0)
+    # 80% pruebas + 20% valoración staff
+    return round((pruebas * 0.8) + (staff * 0.2), 2)
+
+def render_tryouts_page(request: Request) -> str:
+    user = require_user(request)
+    board_team = get_team(request)
+    players = load_tryouts()
+    ranking = sorted(players, key=lambda p: tryout_final(p), reverse=True)
+    leader = ranking[0] if ranking else None
+    avg = round(sum(tryout_final(p) for p in players) / len(players), 2) if players else 0
+
+    rows = []
+    for p in players:
+        total = tryout_total(p)
+        final = tryout_final(p)
+        badge = "top" if final >= 8 else ("mid" if final >= 6 else "low")
+        rows.append(f"""
+        <tr data-player-id="{int(p.get('id') or 0)}">
+            <td class="num">{int(p.get('number') or 0)}</td>
+            <td class="player-cell">
+                <strong>{html.escape(p.get('name') or '')}</strong>
+                <span>{html.escape(p.get('position') or '')}</span>
+            </td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="con" value="{p.get('con',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="pre" value="{p.get('pre',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="ctl" value="{p.get('ctl',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="vel" value="{p.get('vel',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="fis" value="{p.get('fis',0)}"></td>
+            <td><input class="score staff" type="number" min="0" max="10" step="0.1" data-field="staff" value="{p.get('staff',0)}"></td>
+            <td class="total" data-total>{total}</td>
+            <td><span class="final-badge {badge}" data-final>{final}</span></td>
+            <td>
+                <button type="button" class="star {'active' if p.get('favorite') else ''}" data-field="favorite" title="Favorita">★</button>
+            </td>
+            <td>
+                <select data-field="priority" class="priority">
+                    <option value="" {'selected' if not p.get('priority') else ''}>—</option>
+                    <option value="Alta" {'selected' if p.get('priority') == 'Alta' else ''}>Alta</option>
+                    <option value="Media" {'selected' if p.get('priority') == 'Media' else ''}>Media</option>
+                    <option value="Baja" {'selected' if p.get('priority') == 'Baja' else ''}>Baja</option>
+                    <option value="Descartar" {'selected' if p.get('priority') == 'Descartar' else ''}>Descartar</option>
+                </select>
+            </td>
+            <td><input class="notes" type="text" data-field="notes" value="{html.escape(p.get('notes') or '')}" placeholder="Nota rápida..."></td>
+            <td class="save-status" data-status></td>
+        </tr>
+        """)
+
+    top_cards = []
+    for i, p in enumerate(ranking[:5], start=1):
+        top_cards.append(f"""
+        <div class="rank-card">
+            <div class="rank-pos">#{i}</div>
+            <div>
+                <strong>{html.escape(p.get('name') or '')}</strong>
+                <span>{html.escape(p.get('position') or '')} · Dorsal {int(p.get('number') or 0)}</span>
+            </div>
+            <b>{tryout_final(p)}</b>
+        </div>
+        """)
+
+    players_json = html.escape(json.dumps(players, ensure_ascii=False))
+    content = f"""
+    <style>
+      .tryouts-wrap {{ padding:22px 0 34px; }}
+      .tryouts-hero {{ border-radius:28px; padding:28px; color:#fff; background:linear-gradient(135deg,#050816,#111f4d 48%,#00a3ff); box-shadow:0 18px 44px rgba(10,20,58,.22); margin-bottom:18px; }}
+      .tryouts-hero h1 {{ margin:0; font-size:42px; line-height:1; }}
+      .tryouts-hero p {{ margin:8px 0 0; opacity:.9; font-size:16px; }}
+      .tryouts-actions {{ display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }}
+      .tryouts-actions a, .tryouts-actions button {{ border:0; border-radius:12px; padding:11px 14px; font-weight:800; text-decoration:none; cursor:pointer; }}
+      .light-btn {{ background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.25)!important; }}
+      .white-btn {{ background:#fff; color:#0b153c; }}
+      .tryouts-grid {{ display:grid; grid-template-columns:1fr 330px; gap:18px; align-items:start; }}
+      .tryouts-card {{ background:#fff; border-radius:22px; border:1px solid #dbe3f2; box-shadow:0 10px 26px rgba(19,31,72,.08); overflow:hidden; }}
+      .tryouts-card-head {{ padding:16px 18px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid #e8edf6; }}
+      .tryouts-card-head h2 {{ margin:0; font-size:20px; }}
+      .tryouts-table-wrap {{ overflow:auto; }}
+      .tryouts-table {{ width:100%; border-collapse:separate; border-spacing:0; min-width:1180px; }}
+      .tryouts-table th {{ position:sticky; top:0; z-index:1; background:#f7f9fd; color:#34405f; font-size:12px; text-transform:uppercase; letter-spacing:.04em; padding:10px 8px; border-bottom:1px solid #dfe6f2; }}
+      .tryouts-table td {{ padding:8px; border-bottom:1px solid #edf1f7; vertical-align:middle; }}
+      .tryouts-table tr:hover {{ background:#fbfcff; }}
+      .num {{ font-weight:900; color:#1d2b61; width:38px; text-align:center; }}
+      .player-cell strong {{ display:block; font-size:14px; }}
+      .player-cell span {{ display:block; color:#74809a; font-size:12px; margin-top:2px; }}
+      .score {{ width:62px; padding:8px 6px; border:1px solid #cfd8ea; border-radius:10px; text-align:center; font-weight:800; }}
+      .score:focus, .notes:focus, .priority:focus {{ outline:2px solid rgba(0,132,255,.18); border-color:#579bff; }}
+      .staff {{ background:#fffdf4; }}
+      .notes {{ width:190px; padding:9px 10px; border:1px solid #cfd8ea; border-radius:10px; }}
+      .priority {{ padding:8px; border:1px solid #cfd8ea; border-radius:10px; background:#fff; }}
+      .total {{ font-weight:900; text-align:center; color:#24325f; }}
+      .final-badge {{ display:inline-flex; min-width:44px; justify-content:center; border-radius:999px; padding:7px 9px; font-weight:900; }}
+      .final-badge.top {{ background:#dcfce7; color:#166534; }}
+      .final-badge.mid {{ background:#fef3c7; color:#92400e; }}
+      .final-badge.low {{ background:#fee2e2; color:#991b1b; }}
+      .star {{ width:36px; height:36px; border:0; border-radius:50%; cursor:pointer; background:#edf1f7; color:#9aa5bb; font-size:18px; }}
+      .star.active {{ background:#fff1b8; color:#c08400; }}
+      .save-status {{ width:64px; font-size:12px; color:#64748b; }}
+      .side-panel {{ display:flex; flex-direction:column; gap:14px; }}
+      .metric {{ padding:18px; border-bottom:1px solid #edf1f7; }}
+      .metric label {{ display:block; color:#687594; font-size:12px; text-transform:uppercase; font-weight:900; letter-spacing:.05em; }}
+      .metric strong {{ display:block; font-size:34px; margin-top:4px; color:#111f4d; }}
+      .rank-list {{ padding:12px; display:flex; flex-direction:column; gap:9px; }}
+      .rank-card {{ display:grid; grid-template-columns:40px 1fr 48px; gap:10px; align-items:center; padding:11px; border:1px solid #e3e9f4; border-radius:16px; background:#fbfcff; }}
+      .rank-pos {{ width:34px; height:34px; border-radius:12px; display:flex; align-items:center; justify-content:center; background:#111f4d; color:#fff; font-weight:900; }}
+      .rank-card span {{ display:block; color:#74809a; font-size:12px; margin-top:2px; }}
+      .rank-card b {{ text-align:right; font-size:18px; color:#0f766e; }}
+      .mini-help {{ padding:14px 16px; color:#65718d; font-size:13px; line-height:1.45; background:#f8fafc; border-top:1px solid #edf1f7; }}
+      @media(max-width:1050px) {{ .tryouts-grid {{ grid-template-columns:1fr; }} .tryouts-hero h1 {{ font-size:34px; }} }}
+    </style>
+
+    <div class="tryouts-wrap">
+      <div class="tryouts-hero">
+        <div style="display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap;">
+          <div>
+            <h1>Tryouts · Draft Manager</h1>
+            <p>Equipo activo: <strong>{html.escape(board_team or '')}</strong> · valoración rápida de 16 jugadoras sin recargar la pantalla.</p>
+          </div>
+          <div class="tryouts-actions">
+            <a class="light-btn" href="/select-module">Módulos</a>
+            <a class="light-btn" href="/">Draft</a>
+            <a class="light-btn" href="/plantilla">Plantilla</a>
+            <button class="white-btn" type="button" onclick="location.reload()">Recargar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tryouts-grid">
+        <div class="tryouts-card">
+          <div class="tryouts-card-head">
+            <h2>Evaluación rápida</h2>
+            <span class="muted">CON · PRE · CTL · VEL · FIS · STAFF</span>
+          </div>
+          <div class="tryouts-table-wrap">
+            <table class="tryouts-table">
+              <thead>
+                <tr>
+                  <th>#</th><th>Jugadora</th><th>Conducción</th><th>Precisión</th><th>Control</th><th>Velocidad</th><th>Físico</th><th>Staff</th><th>Pruebas</th><th>Final</th><th>Fav</th><th>Prioridad</th><th>Notas</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {''.join(rows)}
+              </tbody>
+            </table>
+          </div>
+          <div class="mini-help">
+            La nota final calcula <strong>80% pruebas + 20% staff</strong>. Se guarda automáticamente al cambiar un dato.
+          </div>
+        </div>
+
+        <div class="side-panel">
+          <div class="tryouts-card">
+            <div class="metric">
+              <label>Líder actual</label>
+              <strong>{html.escape(leader.get('name') if leader else '—')}</strong>
+            </div>
+            <div class="metric">
+              <label>Media final</label>
+              <strong id="avgFinal">{avg}</strong>
+            </div>
+          </div>
+
+          <div class="tryouts-card">
+            <div class="tryouts-card-head"><h2>Top 5</h2></div>
+            <div class="rank-list" id="rankList">
+              {''.join(top_cards)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script id="tryoutsData" type="application/json">{players_json}</script>
+    <script>
+    (function(){{
+      const rows = Array.from(document.querySelectorAll('tr[data-player-id]'));
+      let players = JSON.parse(document.getElementById('tryoutsData').textContent || '[]');
+
+      function clamp(v) {{
+        v = parseFloat(String(v).replace(',', '.'));
+        if (Number.isNaN(v)) return 0;
+        return Math.max(0, Math.min(10, v));
+      }}
+      function esc(v) {{
+        return String(v || '').replace(/[&<>"']/g, s => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}})[s]);
+      }}
+      function calcPruebas(p) {{
+        return Math.round(((clamp(p.con)+clamp(p.pre)+clamp(p.ctl)+clamp(p.vel)+clamp(p.fis))/5)*100)/100;
+      }}
+      function calcFinal(p) {{
+        return Math.round(((calcPruebas(p)*0.8)+(clamp(p.staff)*0.2))*100)/100;
+      }}
+      function badgeClass(v) {{
+        return v >= 8 ? 'top' : (v >= 6 ? 'mid' : 'low');
+      }}
+      function findPlayer(id) {{
+        return players.find(p => Number(p.id) === Number(id));
+      }}
+      function rerenderRanking() {{
+        const ordered = [...players].sort((a,b) => calcFinal(b) - calcFinal(a));
+        const rankList = document.getElementById('rankList');
+        rankList.innerHTML = ordered.slice(0,5).map((p,i)=>`
+          <div class="rank-card">
+            <div class="rank-pos">#${{i+1}}</div>
+            <div><strong>${{esc(p.name)}}</strong><span>${{esc(p.position)}} · Dorsal ${{p.number || ''}}</span></div>
+            <b>${{calcFinal(p)}}</b>
+          </div>`).join('');
+        const avg = ordered.length ? Math.round((ordered.reduce((s,p)=>s+calcFinal(p),0)/ordered.length)*100)/100 : 0;
+        document.getElementById('avgFinal').textContent = avg;
+      }}
+      function updateRow(row, p) {{
+        const total = calcPruebas(p);
+        const final = calcFinal(p);
+        row.querySelector('[data-total]').textContent = total;
+        const badge = row.querySelector('[data-final]');
+        badge.textContent = final;
+        badge.className = 'final-badge ' + badgeClass(final);
+      }}
+      let timers = {{}};
+      function savePlayer(row, p) {{
+        const status = row.querySelector('[data-status]');
+        status.textContent = '...';
+        clearTimeout(timers[p.id]);
+        timers[p.id] = setTimeout(async () => {{
+          try {{
+            const res = await fetch('/tryouts/update', {{
+              method: 'POST',
+              headers: {{'Content-Type':'application/json'}},
+              body: JSON.stringify(p)
+            }});
+            if (!res.ok) throw new Error('Error guardando');
+            status.textContent = 'OK';
+            setTimeout(()=>{{ if(status.textContent === 'OK') status.textContent = ''; }}, 900);
+          }} catch(e) {{
+            status.textContent = 'Error';
+          }}
+        }}, 300);
+      }}
+      rows.forEach(row => {{
+        const id = row.dataset.playerId;
+        const p = findPlayer(id);
+        if (!p) return;
+        row.querySelectorAll('input[data-field]').forEach(input => {{
+          input.addEventListener('input', () => {{
+            const field = input.dataset.field;
+            if (input.type === 'number') p[field] = clamp(input.value);
+            else p[field] = input.value;
+            updateRow(row, p);
+            rerenderRanking();
+            savePlayer(row, p);
+          }});
+        }});
+        row.querySelectorAll('select[data-field]').forEach(select => {{
+          select.addEventListener('change', () => {{
+            p[select.dataset.field] = select.value;
+            savePlayer(row, p);
+          }});
+        }});
+        const star = row.querySelector('.star');
+        star.addEventListener('click', () => {{
+          p.favorite = !p.favorite;
+          star.classList.toggle('active', p.favorite);
+          savePlayer(row, p);
+        }});
+      }});
+    }})();
+    </script>
+    """
+    return page(content)
+
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -1093,7 +1457,7 @@ def select_module_page(request: Request):
                 </div>
             </div>
 
-            <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:24px;max-width:920px;margin:0 auto;'>
+            <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;max-width:1120px;margin:0 auto;'>
                 <div class='card' style='margin:0;text-align:left;border:1px solid #d9e1f0;border-radius:24px;padding:30px;box-shadow:0 12px 26px rgba(19,31,72,.08);'>
                     <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#eef3ff;font-size:28px;margin-bottom:18px;'>📋</div>
                     <h2 style='margin:0 0 12px;font-size:28px;'>Gestión del DRAFT</h2>
@@ -1113,10 +1477,10 @@ def select_module_page(request: Request):
                 </div>
 
                 <div class='card' style='margin:0;text-align:left;border:1px solid #d9e1f0;border-radius:24px;padding:30px;box-shadow:0 12px 26px rgba(19,31,72,.08);'>
-                    <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#fff3df;font-size:28px;margin-bottom:18px;'>🧪</div>
+                    <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#fff7ed;font-size:28px;margin-bottom:18px;'>⚡</div>
                     <h2 style='margin:0 0 12px;font-size:28px;'>Tryouts</h2>
                     <div class='muted' style='margin-bottom:20px;font-size:17px;line-height:1.55;'>
-                        Evaluación rápida de las 16 jugadoras: conducción, precisión, control, velocidad, físico, ranking y favoritas.
+                        Evaluación ligera para puntuar conducción, precisión, control, velocidad, físico y valoración staff.
                     </div>
                     <a class='btn' style='display:inline-block;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700;' href='/tryouts'>Acceder a Tryouts</a>
                 </div>
@@ -1541,7 +1905,7 @@ def plantilla_layout(request: Request, board_team: str, active: str, body: str) 
         f"<div class='card module-shell'>"
         f"<div class='module-hero'>"
         f"<div><h1>Gestión de Plantilla</h1><div class='muted'>Equipo activo: <strong>{html.escape(board_team)}</strong></div></div>"
-        f"<div class='module-actions'><a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a><a class='btn btn-secondary' href='/tryouts'>Tryouts</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
+        f"<div class='module-actions'><a class='btn btn-secondary' href='/select-module'>Cambiar módulo</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div>"
         f"</div>"
         f"{plantilla_module_nav(active)}"
         f"{body}"
@@ -1641,11 +2005,11 @@ def render_board_module_body(board_team: str) -> str:
  const available=JSON.parse(document.getElementById('boardAvailableData').textContent);
  let state=[];
  try{state=JSON.parse(input.value||'[]'); if(!Array.isArray(state)) state=[];}catch(e){state=[];}
- function esc(v){return String(v||'').replace(/[&<>"']/g,function(s){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[s];});}
+ function esc(v){return String(v||'').replace(/[&<>\"']/g,function(s){return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'})[s];});}
  function save(){input.value=JSON.stringify(state);}
  function renderSide(){
    if(!state.length){side.innerHTML="<div class='board-empty'>No hay jugadoras en la pizarra.</div>"; return;}
-   side.innerHTML=state.map((p,i)=>`<div class="board-side-item"><div><strong>${esc(p.name||'Sin nombre')}</strong><span class="mini-meta">${Math.round(p.x)}% / ${Math.round(p.y)}%</span></div><button type="button" class="btn btn-danger action-btn" data-remove="${i}">Quitar</button></div>`).join('');
+   side.innerHTML=state.map((p,i)=>`<div class=\"board-side-item\"><div><strong>${esc(p.name||'Sin nombre')}</strong><span class=\"mini-meta\">${Math.round(p.x)}% / ${Math.round(p.y)}%</span></div><button type=\"button\" class=\"btn btn-danger action-btn\" data-remove=\"${i}\">Quitar</button></div>`).join('');
    side.querySelectorAll('[data-remove]').forEach(btn=>btn.addEventListener('click',()=>{state.splice(Number(btn.dataset.remove),1); render();}));
  }
  function wire(el,p){
@@ -1660,7 +2024,7 @@ def render_board_module_body(board_team: str) -> str:
  }
  function render(){
    pitch.innerHTML='';
-   state.forEach((p,i)=>{const el=document.createElement('div'); el.className='board-player'; el.style.left=(p.x||50)+'%'; el.style.top=(p.y||50)+'%'; el.innerHTML=`<div class="board-player-dot">${i+1}</div><input value="${esc(p.name||'')}" maxlength="80">`; pitch.appendChild(el); wire(el,p);});
+   state.forEach((p,i)=>{const el=document.createElement('div'); el.className='board-player'; el.style.left=(p.x||50)+'%'; el.style.top=(p.y||50)+'%'; el.innerHTML=`<div class=\"board-player-dot\">${i+1}</div><input value=\"${esc(p.name||'')}\" maxlength=\"80\">`; pitch.appendChild(el); wire(el,p);});
    save(); renderSide();
  }
  window.addBoardPlayer=function(name){state.push({id:'manual-'+Date.now()+Math.random().toString(36).slice(2,7), name:name||'', x:50, y:50}); render();};
@@ -1809,7 +2173,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/edit/{pid}?from=/player/{pid}'>Editar</a>",
                 f"<form class='inline-form' action='/decision/{pid}' method='post'><input type='hidden' name='status' value='Objetivo'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
-                f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm(\'¿Seguro que quieres borrar esta jugadora?\')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+                f"<form class='inline-form' action='/delete-player/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='player_ids' value='{pid}'></td><td>{html.escape(name or '')}</td><td>{html.escape(team or '')}</td><td>{html.escape(position or '')}</td><td><span class='pill {status_class(status)}'>{html.escape(status)}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
@@ -1869,7 +2233,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 "<button class='btn btn-success' type='submit' formaction='/bulk-selected-status' formmethod='post' name='status' value='Objetivo'>Añadir a Draft Day</button>"
                 "<button class='btn btn-light' type='submit' formaction='/bulk-selected-remove'>Quitar</button>"
                 "<a class='btn btn-light' href='/export?tab=objectives'>Exportar Excel</a>"
-                "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm(\'¿Seguro que quieres resetear toda la preselección de este equipo?\')\">Reset preselección</button>"
+                "<button class='btn btn-danger' type='submit' formaction='/reset-selected' onclick=\"return confirm('¿Seguro que quieres resetear toda la preselección de este equipo?')\">Reset preselección</button>"
                 "</div>"
             )
 
@@ -2039,7 +2403,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             f"<a class='btn btn-secondary' href='/?tab=newplayers'>Jugadoras nuevas</a>"f"<a class='btn btn-secondary' href='/?tab=objectives'>Preselección</a>"
             f"<a class='btn btn-secondary' href='/?tab=final'>Plantilla</a>"
             f"<a class='btn btn-dark' href='/?tab=draftday'>DRAFT DAY</a>"
-            f"<a class='btn btn-secondary' href='/tryouts'>Tryouts</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
+            f"<a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a>"
             f"<a class='btn btn-secondary' href='/logout'>Salir</a>"
             f"</div></div>"
             f"<div class='card'><h2>Control del draft</h2>"
@@ -2119,7 +2483,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
                 f"<option value='1' {'selected' if is_admin_flag else ''}>Admin</option>"
             )
             delete_button = (
-                f"<form class='inline-form' action='/users/delete/{uid}' method='post' onsubmit=\"return confirm(\'¿Borrar usuario?\')\">"
+                f"<form class='inline-form' action='/users/delete/{uid}' method='post' onsubmit=\"return confirm('¿Borrar usuario?')\">"
                 f"<button class='btn btn-danger action-btn' type='submit'>Borrar</button></form>"
             )
             if uname == user["username"]:
@@ -2227,13 +2591,13 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
             actions = "".join([
                 f"<a class='btn btn-light action-btn' href='/new-player/{pid}'>Ver ficha</a>",
                 f"<form class='inline-form' action='/new-player/to-preselection/{pid}' method='post'><button class='btn-warning action-btn' type='submit'>Añadir a preselección</button></form>",
-                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm(\'¿Seguro que quieres borrar esta jugadora nueva?\')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
+                f"<form class='inline-form' action='/new-player/delete/{pid}' method='post' onsubmit=\"return confirm('¿Seguro que quieres borrar esta jugadora nueva?')\"><button class='btn btn-danger action-btn' type='submit'>Eliminar</button></form>",
             ])
             rows += f"<tr data-player-row='1' data-status='{html.escape(scout_status)}' data-round='' data-search='{html.escape(search_blob)}'><td><input type='checkbox' name='new_player_ids' value='{pid}'></td><td>{html.escape(dorsal or '')}</td><td>{html.escape(name or '')}</td><td>{html.escape(position or '')}</td><td>{html.escape(estimated_level or '')}</td><td>{html.escape(fit_level or '')}</td><td><span class='pill {status_class(scout_status)}'>{html.escape(scout_status or '')}</span></td><td>{html.escape(notes or '')}</td><td><div class='draftday-actions'>{actions}</div></td></tr>"
         if not rows:
             rows = "<tr><td colspan='9' class='muted'>No hay jugadoras nuevas creadas.</td></tr>"
 
-        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit' form='newPlayersBulkForm'>Añadir a preselección</button><button class='btn btn-danger' type='submit' form='newPlayersBulkForm' formaction='/new-players/bulk-delete' formmethod='post' onclick=\"return confirm(\'¿Seguro que quieres borrar las jugadoras nuevas seleccionadas?\')\">Eliminar seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
+        bulk_actions = "<div class='actions-toolbar' style='margin-bottom:12px;'><button class='btn btn-warning' type='submit' form='newPlayersBulkForm'>Añadir a preselección</button><button class='btn btn-danger' type='submit' form='newPlayersBulkForm' formaction='/new-players/bulk-delete' formmethod='post' onclick=\"return confirm('¿Seguro que quieres borrar las jugadoras nuevas seleccionadas?')\">Eliminar seleccionadas</button><button class='btn btn-secondary' type='button' onclick='clearSelectedPlayers(); return false;'>Quitar selección</button></div>"
         table_html = (
             f"<form id='newPlayersBulkForm' action='/new-players/bulk-to-preselection' method='post'></form>"
             f"{bulk_actions}"
@@ -2246,10 +2610,10 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/tryouts'>Tryouts</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
-            f"<div class='actions-toolbar' style='margin:12px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><form action='/import-newplayers' method='post' enctype='multipart/form-data' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0;'><input type='file' name='file' accept='.csv' required><button class='btn btn-success' type='submit' onclick=\"return confirm(\'Se sustituirá por completo el listado actual de jugadoras nuevas. ¿Continuar?\')\">Importar CSV</button></form></div>"
+            f"<div class='actions-toolbar' style='margin:12px 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;'><a class='btn' href='/export?tab={tab}'>Exportar Excel</a><form action='/import-newplayers' method='post' enctype='multipart/form-data' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0;'><input type='file' name='file' accept='.csv' required><button class='btn btn-success' type='submit' onclick=\"return confirm('Se sustituirá por completo el listado actual de jugadoras nuevas. ¿Continuar?')\">Importar CSV</button></form></div>"
             f"{add_box}"
             f"<div class='card'><h2>Filtros</h2><div class='grid-3'>"
             f"<div><label>Buscar</label><input id='liveSearch' placeholder='nombre, dorsal, posición, notas'></div>"
@@ -2289,11 +2653,11 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
  const available=JSON.parse(document.getElementById('boardAvailableData').textContent);
  let state=[];
  try{state=JSON.parse(input.value||'[]'); if(!Array.isArray(state)) state=[];}catch(e){state=[];}
- function esc(v){return String(v||'').replace(/[&<>"']/g,function(s){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[s];});}
+ function esc(v){return String(v||'').replace(/[&<>"']/g,function(s){return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'})[s];});}
  function save(){input.value=JSON.stringify(state);}
  function renderSide(){
    if(!state.length){side.innerHTML="<div class='board-empty'>No hay jugadoras en la pizarra.</div>"; return;}
-   side.innerHTML=state.map((p,i)=>`<div class="board-side-item"><div><strong>${esc(p.name||'Sin nombre')}</strong><span class="mini-meta">${Math.round(p.x)}% / ${Math.round(p.y)}%</span></div><button type="button" class="btn btn-danger action-btn" data-remove="${i}">Quitar</button></div>`).join('');
+   side.innerHTML=state.map((p,i)=>`<div class=\"board-side-item\"><div><strong>${esc(p.name||'Sin nombre')}</strong><span class=\"mini-meta\">${Math.round(p.x)}% / ${Math.round(p.y)}%</span></div><button type=\"button\" class=\"btn btn-danger action-btn\" data-remove=\"${i}\">Quitar</button></div>`).join('');
    side.querySelectorAll('[data-remove]').forEach(btn=>btn.addEventListener('click',()=>{state.splice(Number(btn.dataset.remove),1); render();}));
  }
  function wire(el,p){
@@ -2308,7 +2672,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
  }
  function render(){
    pitch.innerHTML='';
-   state.forEach((p,i)=>{const el=document.createElement('div'); el.className='board-player'; el.style.left=(p.x||50)+'%'; el.style.top=(p.y||50)+'%'; el.innerHTML=`<div class="board-player-dot">${i+1}</div><input value="${esc(p.name||'')}" maxlength="80">`; pitch.appendChild(el); wire(el,p);});
+   state.forEach((p,i)=>{const el=document.createElement('div'); el.className='board-player'; el.style.left=(p.x||50)+'%'; el.style.top=(p.y||50)+'%'; el.innerHTML=`<div class=\"board-player-dot\">${i+1}</div><input value=\"${esc(p.name||'')}\" maxlength=\"80\">`; pitch.appendChild(el); wire(el,p);});
    save(); renderSide();
  }
  window.addBoardPlayer=function(name){state.push({id:'manual-'+Date.now()+Math.random().toString(36).slice(2,7), name:name||'', x:50, y:50}); render();};
@@ -2322,7 +2686,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 </script>"""
         content = (
             f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/tryouts'>Tryouts</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+            f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
             f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
             f"{admin_box}"
             f"<div class='card'><strong>Pizarra compartida del equipo</strong><br><span class='muted'>Última actualización: {updated_text}</span><br><span class='muted'>Guardado por: {updated_by_text}</span></div>"
@@ -2338,7 +2702,7 @@ def home(request: Request, tab: str = "database", sort: str = "id", order: str =
 
     content = (
         f"<div class='topbar'><div><h1>{board_team}</h1><div class='muted'>Usuario: <strong>{html.escape(user['username'])}</strong></div></div>"
-        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/tryouts'>Tryouts</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
+        f"<div class='draftday-actions'><a class='btn btn-secondary {'active-menu' if tab=='database' else ''}' href='/?tab=database'>Jugadoras</a><a class='btn btn-secondary {'active-menu' if tab=='newplayers' else ''}' href='/?tab=newplayers'>Jugadoras nuevas</a><a class='btn btn-secondary {'active-menu' if tab=='objectives' else ''}' href='/?tab=objectives'>Preselección</a><a class='btn btn-secondary {'active-menu' if tab=='final' else ''}' href='/?tab=final'>Plantilla</a><a class='btn btn-secondary {'active-menu' if tab=='draftday' else ''}' href='/?tab=draftday'>DRAFT DAY</a><a class='btn btn-secondary {'active-menu' if tab=='board' else ''}' href='/plantilla'>Gestión de Plantilla</a><a class='btn btn-secondary' href='/select-team'>Cambiar equipo</a><a class='btn btn-secondary' href='/logout'>Salir</a></div></div>"
         f"<div class='stats'><div class='stat'><div class='muted'>Total jugadoras</div><div class='stat-number'>{total}</div></div><div class='stat'><div class='muted'>Objetivos {board_team}</div><div class='stat-number'>{objetivos}</div></div><div class='stat'><div class='muted'>Plantilla definitiva {board_team}</div><div class='stat-number'>{elegidas}</div></div><div class='stat'><div class='muted'>Fichadas por otro equipo</div><div class='stat-number'>{otros}</div></div></div>"
         f"{admin_box}"
         
@@ -3761,290 +4125,3 @@ def new_player_to_preselection(player_id: int, request: Request):
     finally:
         cur.close(); conn.close()
     return RedirectResponse("/?tab=objectives", status_code=303)
-
-
-# =========================
-# TRYOUTS - MODULO LIGERO
-# =========================
-
-TRYOUTS_FILE = os.path.join(BASE_DIR, "tryouts_data.json")
-
-DEFAULT_TRYOUT_PLAYERS = [
-    {"id": "p02", "number": 2, "name": "Laia Jordán", "position": "Defensa"},
-    {"id": "p03", "number": 3, "name": "Miriam Crespo", "position": "Defensa"},
-    {"id": "p04", "number": 4, "name": "Laia Crespo", "position": "Defensa"},
-    {"id": "p05", "number": 5, "name": "Mónica López", "position": "Medio"},
-    {"id": "p06", "number": 6, "name": "Mar Garcia-Quijada", "position": "Medio"},
-    {"id": "p07", "number": 7, "name": "Esther Solà", "position": "Defensa"},
-    {"id": "p08", "number": 8, "name": "Yolanda Bonnin", "position": "Delantera"},
-    {"id": "p09", "number": 9, "name": "Alexandra Giró", "position": "Medio"},
-    {"id": "p10", "number": 10, "name": "Yesenia Ortiz", "position": "Delantera"},
-    {"id": "p11", "number": 11, "name": "Ari Ramos", "position": "Medio"},
-    {"id": "p12", "number": 12, "name": "Verónica Portillo", "position": "Medio"},
-    {"id": "p13", "number": 13, "name": "Maika Nchana", "position": "Delantera"},
-    {"id": "p14", "number": 14, "name": "Morena Maria Gianfico", "position": "Delantera"},
-    {"id": "p15", "number": 15, "name": "Teresa Penzo", "position": "Medio"},
-    {"id": "p16", "number": 16, "name": "Alessia D’angelo", "position": "Defensa"},
-    {"id": "p17", "number": 17, "name": "Gabriella Langella", "position": "Medio"},
-]
-
-def _tryouts_default_data():
-    data = []
-    for p in DEFAULT_TRYOUT_PLAYERS:
-        item = dict(p)
-        item.update({
-            "con": 0,
-            "pre": 0,
-            "ctl": 0,
-            "vel": 0,
-            "fis": 0,
-            "staff": 0,
-            "favorite": False,
-            "status": "Pendiente",
-            "notes": ""
-        })
-        data.append(item)
-    return data
-
-def load_tryouts_data():
-    if not os.path.exists(TRYOUTS_FILE):
-        data = _tryouts_default_data()
-        with open(TRYOUTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return data
-    try:
-        with open(TRYOUTS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return _tryouts_default_data()
-
-def save_tryouts_data(data):
-    with open(TRYOUTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-@app.get("/api/tryouts", response_class=JSONResponse)
-def api_get_tryouts():
-    return JSONResponse(load_tryouts_data())
-
-@app.post("/api/tryouts", response_class=JSONResponse)
-async def api_save_tryouts(request: Request):
-    payload = await request.json()
-    if not isinstance(payload, list):
-        return JSONResponse({"ok": False, "error": "Formato inválido"}, status_code=400)
-    cleaned = []
-    allowed_status = {"Pendiente", "Favorita", "Prioridad", "Descartada"}
-    for row in payload:
-        if not isinstance(row, dict):
-            continue
-        item = {
-            "id": str(row.get("id", ""))[:30],
-            "number": int(row.get("number", 0) or 0),
-            "name": str(row.get("name", ""))[:120],
-            "position": str(row.get("position", ""))[:40],
-            "con": max(0, min(10, float(row.get("con", 0) or 0))),
-            "pre": max(0, min(10, float(row.get("pre", 0) or 0))),
-            "ctl": max(0, min(10, float(row.get("ctl", 0) or 0))),
-            "vel": max(0, min(10, float(row.get("vel", 0) or 0))),
-            "fis": max(0, min(10, float(row.get("fis", 0) or 0))),
-            "staff": max(0, min(10, float(row.get("staff", 0) or 0))),
-            "favorite": bool(row.get("favorite", False)),
-            "status": str(row.get("status", "Pendiente")) if str(row.get("status", "Pendiente")) in allowed_status else "Pendiente",
-            "notes": str(row.get("notes", ""))[:600],
-        }
-        cleaned.append(item)
-    save_tryouts_data(cleaned)
-    return JSONResponse({"ok": True, "count": len(cleaned)})
-
-@app.get("/tryouts", response_class=HTMLResponse)
-def tryouts_page():
-    return HTMLResponse("""
-<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft Manager · Tryouts</title>
-<style>
-:root{--bg:#080b12;--panel:#111827;--panel2:#0f172a;--line:#243044;--txt:#eef2ff;--mut:#94a3b8;--gold:#fbbf24;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--blue:#38bdf8}
-*{box-sizing:border-box}
-body{margin:0;background:linear-gradient(135deg,#05070d,#111827 45%,#020617);color:var(--txt);font-family:Arial,Helvetica,sans-serif}
-.wrap{max-width:1450px;margin:0 auto;padding:18px}
-.header{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}
-h1{margin:0;font-size:28px;letter-spacing:.5px}
-.sub{color:var(--mut);font-size:13px;margin-top:4px}
-.btn{border:1px solid var(--line);background:#162033;color:var(--txt);border-radius:10px;padding:9px 12px;cursor:pointer;font-weight:700}
-.btn:hover{border-color:var(--blue)}
-.btn.gold{background:linear-gradient(135deg,#f59e0b,#fbbf24);color:#111827;border:none}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
-.card{background:rgba(15,23,42,.86);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 12px 30px rgba(0,0,0,.22)}
-.card b{font-size:22px}
-.card span{display:block;color:var(--mut);font-size:12px;margin-top:3px}
-.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-select,input.search{background:#0b1220;color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:9px}
-.tablebox{background:rgba(15,23,42,.92);border:1px solid var(--line);border-radius:16px;overflow:auto}
-table{width:100%;border-collapse:collapse;min-width:1120px}
-th,td{border-bottom:1px solid rgba(148,163,184,.18);padding:8px;text-align:left;font-size:13px}
-th{position:sticky;top:0;background:#111827;z-index:1;color:#cbd5e1;text-transform:uppercase;font-size:11px;letter-spacing:.7px}
-tr:hover{background:rgba(56,189,248,.06)}
-.num{width:58px;text-align:center;color:var(--gold);font-weight:800}
-.player{font-weight:800}
-.pos{color:#cbd5e1}
-.score{width:64px}
-.score input{width:54px;background:#020617;color:#fff;border:1px solid #334155;border-radius:8px;padding:8px;text-align:center;font-weight:800}
-.notes input{min-width:220px;width:100%;background:#020617;color:#fff;border:1px solid #334155;border-radius:8px;padding:8px}
-.total{font-weight:900;font-size:15px}
-.badge{display:inline-block;border-radius:999px;padding:5px 9px;font-weight:900;font-size:12px}
-.b-ok{background:rgba(34,197,94,.15);color:#86efac;border:1px solid rgba(34,197,94,.35)}
-.b-warn{background:rgba(245,158,11,.15);color:#fcd34d;border:1px solid rgba(245,158,11,.35)}
-.b-bad{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.35)}
-.star{font-size:22px;cursor:pointer;background:none;border:none}
-.status{background:#020617;color:#fff;border:1px solid #334155;border-radius:8px;padding:8px}
-.saved{color:#86efac;font-size:13px}
-small{color:var(--mut)}
-@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.header{align-items:flex-start;flex-direction:column}}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="header">
-    <div>
-      <h1>TRYOUTS · Draft Manager</h1>
-      <div class="sub">Evaluación ligera para 16 jugadoras · guardado automático sin recargar pantalla</div>
-    </div>
-    <div>
-      <button class="btn" onclick="location.href='/'">← Volver</button>
-      <button class="btn gold" onclick="resetData()">Reset</button>
-    </div>
-  </div>
-
-  <div class="cards">
-    <div class="card"><b id="topName">-</b><span>Top ranking</span></div>
-    <div class="card"><b id="avgScore">0.0</b><span>Media global</span></div>
-    <div class="card"><b id="favCount">0</b><span>Favoritas</span></div>
-    <div class="card"><b id="savedState" class="saved">Cargando...</b><span>Estado</span></div>
-  </div>
-
-  <div class="toolbar">
-    <input class="search" id="search" placeholder="Buscar jugadora..." oninput="render()">
-    <select id="posFilter" onchange="render()">
-      <option value="">Todas las posiciones</option>
-      <option>Defensa</option>
-      <option>Medio</option>
-      <option>Delantera</option>
-    </select>
-    <select id="statusFilter" onchange="render()">
-      <option value="">Todos los estados</option>
-      <option>Pendiente</option>
-      <option>Favorita</option>
-      <option>Prioridad</option>
-      <option>Descartada</option>
-    </select>
-    <button class="btn" onclick="sortMode='ranking';render()">Ordenar por ranking</button>
-    <button class="btn" onclick="sortMode='dorsal';render()">Ordenar por dorsal</button>
-  </div>
-
-  <div class="tablebox">
-    <table>
-      <thead>
-        <tr>
-          <th>#</th><th>Jugadora</th><th>Posición</th>
-          <th>CON</th><th>PRE</th><th>CTL</th><th>VEL</th><th>FIS</th><th>STAFF</th>
-          <th>Total</th><th>Estado</th><th>⭐</th><th>Notas</th>
-        </tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
-  </div>
-  <p><small>CON=Conducción · PRE=Precisión · CTL=Control · VEL=Velocidad/Reacción · FIS=Físico/Agilidad · STAFF=Valoración interna.</small></p>
-</div>
-<script>
-let players = [];
-let saveTimer = null;
-let sortMode = 'ranking';
-
-function n(v){ const x=parseFloat(v); return isNaN(x)?0:Math.max(0,Math.min(10,x)); }
-function total(p){ return ((n(p.con)+n(p.pre)+n(p.ctl)+n(p.vel)+n(p.fis)+n(p.staff))/6); }
-function badge(t){
-  if(t>=8) return '<span class="badge b-ok">'+t.toFixed(1)+'</span>';
-  if(t>=6) return '<span class="badge b-warn">'+t.toFixed(1)+'</span>';
-  return '<span class="badge b-bad">'+t.toFixed(1)+'</span>';
-}
-async function load(){
-  const r = await fetch('/api/tryouts');
-  players = await r.json();
-  document.getElementById('savedState').textContent='Cargado';
-  render();
-}
-function scheduleSave(){
-  document.getElementById('savedState').textContent='Guardando...';
-  clearTimeout(saveTimer);
-  saveTimer=setTimeout(save,450);
-}
-async function save(){
-  await fetch('/api/tryouts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(players)});
-  document.getElementById('savedState').textContent='Guardado ✓';
-}
-function update(id,key,value){
-  const p=players.find(x=>x.id===id);
-  if(!p) return;
-  if(['con','pre','ctl','vel','fis','staff'].includes(key)) p[key]=n(value);
-  else if(key==='favorite') p.favorite=!!value;
-  else p[key]=value;
-  scheduleSave();
-  renderStatsOnly();
-}
-function toggleFav(id){
-  const p=players.find(x=>x.id===id);
-  if(!p) return;
-  p.favorite=!p.favorite;
-  if(p.favorite && p.status==='Pendiente') p.status='Favorita';
-  scheduleSave();
-  render();
-}
-function renderStatsOnly(){
-  const sorted=[...players].sort((a,b)=>total(b)-total(a));
-  document.getElementById('topName').textContent=sorted[0] ? sorted[0].name+' · '+total(sorted[0]).toFixed(1) : '-';
-  document.getElementById('avgScore').textContent=(players.reduce((s,p)=>s+total(p),0)/(players.length||1)).toFixed(1);
-  document.getElementById('favCount').textContent=players.filter(p=>p.favorite || p.status==='Favorita' || p.status==='Prioridad').length;
-}
-function render(){
-  const q=document.getElementById('search').value.toLowerCase();
-  const pf=document.getElementById('posFilter').value;
-  const sf=document.getElementById('statusFilter').value;
-  let rows=[...players].filter(p=>
-    (!q || p.name.toLowerCase().includes(q)) &&
-    (!pf || p.position===pf) &&
-    (!sf || p.status===sf)
-  );
-  if(sortMode==='ranking') rows.sort((a,b)=>total(b)-total(a));
-  else rows.sort((a,b)=>(a.number||0)-(b.number||0));
-  document.getElementById('tbody').innerHTML=rows.map(p=>`
-    <tr>
-      <td class="num">${p.number}</td>
-      <td class="player">${p.name}</td>
-      <td class="pos">${p.position}</td>
-      ${['con','pre','ctl','vel','fis','staff'].map(k=>`<td class="score"><input type="number" min="0" max="10" step="0.5" value="${p[k]||0}" onchange="update('${p.id}','${k}',this.value)" oninput="update('${p.id}','${k}',this.value)"></td>`).join('')}
-      <td class="total">${badge(total(p))}</td>
-      <td><select class="status" onchange="update('${p.id}','status',this.value)">
-        ${['Pendiente','Favorita','Prioridad','Descartada'].map(s=>`<option ${p.status===s?'selected':''}>${s}</option>`).join('')}
-      </select></td>
-      <td><button class="star" onclick="toggleFav('${p.id}')">${p.favorite?'⭐':'☆'}</button></td>
-      <td class="notes"><input value="${String(p.notes||'').replaceAll('"','&quot;')}" oninput="update('${p.id}','notes',this.value)" placeholder="Comentario staff..."></td>
-    </tr>
-  `).join('');
-  renderStatsOnly();
-}
-function resetData(){
-  if(!confirm('¿Resetear puntuaciones y notas?')) return;
-  players=players.map(p=>({...p,con:0,pre:0,ctl:0,vel:0,fis:0,staff:0,favorite:false,status:'Pendiente',notes:''}));
-  scheduleSave();
-  render();
-}
-load();
-</script>
-</body>
-</html>
-""")
