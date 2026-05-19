@@ -78,6 +78,370 @@ def _pick_row_value(row: dict, *keys: str) -> str:
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# =========================
+# TRYOUTS - módulo ligero
+# =========================
+TRYOUTS_FILE = os.path.join(BASE_DIR, "tryouts_data.json")
+
+DEFAULT_TRYOUTS = [
+    {"name": "Laia Jordán", "position": "Defensa", "number": 2},
+    {"name": "Miriam Crespo", "position": "Defensa", "number": 3},
+    {"name": "Laia Crespo", "position": "Defensa", "number": 4},
+    {"name": "Mónica López", "position": "Medio", "number": 5},
+    {"name": "Mar Garcia-Quijada", "position": "Medio", "number": 6},
+    {"name": "Esther Solà", "position": "Defensa", "number": 7},
+    {"name": "Yolanda Bonnin", "position": "Delantera", "number": 8},
+    {"name": "Alexandra Giró", "position": "Medio", "number": 9},
+    {"name": "Yesenia Ortiz", "position": "Delantera", "number": 10},
+    {"name": "Ari Ramos", "position": "Medio", "number": 11},
+    {"name": "Verónica Portillo", "position": "Medio", "number": 12},
+    {"name": "Maika Nchana", "position": "Delantera", "number": 13},
+    {"name": "Morena Maria Gianfico", "position": "Delantera", "number": 14},
+    {"name": "Teresa Penzo", "position": "Medio", "number": 15},
+    {"name": "Alessia D'angelo", "position": "Defensa", "number": 16},
+    {"name": "Gabriella Langella", "position": "Medio", "number": 17},
+]
+
+def _tryouts_defaults():
+    data = []
+    for idx, p in enumerate(DEFAULT_TRYOUTS, start=1):
+        item = dict(p)
+        item["id"] = idx
+        item["con"] = 0
+        item["pre"] = 0
+        item["ctl"] = 0
+        item["vel"] = 0
+        item["fis"] = 0
+        item["staff"] = 0
+        item["favorite"] = False
+        item["priority"] = ""
+        item["notes"] = ""
+        data.append(item)
+    return data
+
+def load_tryouts():
+    if not os.path.exists(TRYOUTS_FILE):
+        data = _tryouts_defaults()
+        save_tryouts(data)
+        return data
+    try:
+        with open(TRYOUTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            raise ValueError("tryouts_data.json no contiene una lista")
+    except Exception:
+        data = _tryouts_defaults()
+        save_tryouts(data)
+
+    defaults_by_number = {p["number"]: p for p in _tryouts_defaults()}
+    normalized = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        number = int(item.get("number") or 0)
+        base = defaults_by_number.get(number, {})
+        merged = dict(base)
+        merged.update(item)
+        merged["id"] = int(merged.get("id") or number or len(normalized) + 1)
+        merged["number"] = number or int(merged.get("id") or len(normalized) + 1)
+        for key in ("con", "pre", "ctl", "vel", "fis", "staff"):
+            try:
+                merged[key] = max(0, min(10, float(merged.get(key) or 0)))
+            except Exception:
+                merged[key] = 0
+        merged["favorite"] = bool(merged.get("favorite"))
+        merged["priority"] = (merged.get("priority") or "").strip()
+        merged["notes"] = (merged.get("notes") or "").strip()
+        normalized.append(merged)
+
+    existing_numbers = {p.get("number") for p in normalized}
+    for p in _tryouts_defaults():
+        if p["number"] not in existing_numbers:
+            normalized.append(p)
+
+    return sorted(normalized, key=lambda x: int(x.get("number") or 999))
+
+def save_tryouts(data):
+    with open(TRYOUTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data if isinstance(data, list) else [], f, ensure_ascii=False, indent=2)
+
+def tryout_total(player: dict) -> float:
+    values = [float(player.get(k) or 0) for k in ("con", "pre", "ctl", "vel", "fis")]
+    return round(sum(values) / 5, 2)
+
+def tryout_final(player: dict) -> float:
+    pruebas = tryout_total(player)
+    staff = float(player.get("staff") or 0)
+    # 80% pruebas + 20% valoración staff
+    return round((pruebas * 0.8) + (staff * 0.2), 2)
+
+def render_tryouts_page(request: Request) -> str:
+    user = require_user(request)
+    board_team = get_team(request)
+    players = load_tryouts()
+    ranking = sorted(players, key=lambda p: tryout_final(p), reverse=True)
+    leader = ranking[0] if ranking else None
+    avg = round(sum(tryout_final(p) for p in players) / len(players), 2) if players else 0
+
+    rows = []
+    for p in players:
+        total = tryout_total(p)
+        final = tryout_final(p)
+        badge = "top" if final >= 8 else ("mid" if final >= 6 else "low")
+        rows.append(f"""
+        <tr data-player-id="{int(p.get('id') or 0)}">
+            <td class="num">{int(p.get('number') or 0)}</td>
+            <td class="player-cell">
+                <strong>{html.escape(p.get('name') or '')}</strong>
+                <span>{html.escape(p.get('position') or '')}</span>
+            </td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="con" value="{p.get('con',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="pre" value="{p.get('pre',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="ctl" value="{p.get('ctl',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="vel" value="{p.get('vel',0)}"></td>
+            <td><input class="score" type="number" min="0" max="10" step="0.1" data-field="fis" value="{p.get('fis',0)}"></td>
+            <td><input class="score staff" type="number" min="0" max="10" step="0.1" data-field="staff" value="{p.get('staff',0)}"></td>
+            <td class="total" data-total>{total}</td>
+            <td><span class="final-badge {badge}" data-final>{final}</span></td>
+            <td>
+                <button type="button" class="star {'active' if p.get('favorite') else ''}" data-field="favorite" title="Favorita">★</button>
+            </td>
+            <td>
+                <select data-field="priority" class="priority">
+                    <option value="" {'selected' if not p.get('priority') else ''}>—</option>
+                    <option value="Alta" {'selected' if p.get('priority') == 'Alta' else ''}>Alta</option>
+                    <option value="Media" {'selected' if p.get('priority') == 'Media' else ''}>Media</option>
+                    <option value="Baja" {'selected' if p.get('priority') == 'Baja' else ''}>Baja</option>
+                    <option value="Descartar" {'selected' if p.get('priority') == 'Descartar' else ''}>Descartar</option>
+                </select>
+            </td>
+            <td><input class="notes" type="text" data-field="notes" value="{html.escape(p.get('notes') or '')}" placeholder="Nota rápida..."></td>
+            <td class="save-status" data-status></td>
+        </tr>
+        """)
+
+    top_cards = []
+    for i, p in enumerate(ranking[:5], start=1):
+        top_cards.append(f"""
+        <div class="rank-card">
+            <div class="rank-pos">#{i}</div>
+            <div>
+                <strong>{html.escape(p.get('name') or '')}</strong>
+                <span>{html.escape(p.get('position') or '')} · Dorsal {int(p.get('number') or 0)}</span>
+            </div>
+            <b>{tryout_final(p)}</b>
+        </div>
+        """)
+
+    players_json = html.escape(json.dumps(players, ensure_ascii=False))
+    content = f"""
+    <style>
+      .tryouts-wrap {{ padding:22px 0 34px; }}
+      .tryouts-hero {{ border-radius:28px; padding:28px; color:#fff; background:linear-gradient(135deg,#050816,#111f4d 48%,#00a3ff); box-shadow:0 18px 44px rgba(10,20,58,.22); margin-bottom:18px; }}
+      .tryouts-hero h1 {{ margin:0; font-size:42px; line-height:1; }}
+      .tryouts-hero p {{ margin:8px 0 0; opacity:.9; font-size:16px; }}
+      .tryouts-actions {{ display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }}
+      .tryouts-actions a, .tryouts-actions button {{ border:0; border-radius:12px; padding:11px 14px; font-weight:800; text-decoration:none; cursor:pointer; }}
+      .light-btn {{ background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.25)!important; }}
+      .white-btn {{ background:#fff; color:#0b153c; }}
+      .tryouts-grid {{ display:grid; grid-template-columns:1fr 330px; gap:18px; align-items:start; }}
+      .tryouts-card {{ background:#fff; border-radius:22px; border:1px solid #dbe3f2; box-shadow:0 10px 26px rgba(19,31,72,.08); overflow:hidden; }}
+      .tryouts-card-head {{ padding:16px 18px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid #e8edf6; }}
+      .tryouts-card-head h2 {{ margin:0; font-size:20px; }}
+      .tryouts-table-wrap {{ overflow:auto; }}
+      .tryouts-table {{ width:100%; border-collapse:separate; border-spacing:0; min-width:1180px; }}
+      .tryouts-table th {{ position:sticky; top:0; z-index:1; background:#f7f9fd; color:#34405f; font-size:12px; text-transform:uppercase; letter-spacing:.04em; padding:10px 8px; border-bottom:1px solid #dfe6f2; }}
+      .tryouts-table td {{ padding:8px; border-bottom:1px solid #edf1f7; vertical-align:middle; }}
+      .tryouts-table tr:hover {{ background:#fbfcff; }}
+      .num {{ font-weight:900; color:#1d2b61; width:38px; text-align:center; }}
+      .player-cell strong {{ display:block; font-size:14px; }}
+      .player-cell span {{ display:block; color:#74809a; font-size:12px; margin-top:2px; }}
+      .score {{ width:62px; padding:8px 6px; border:1px solid #cfd8ea; border-radius:10px; text-align:center; font-weight:800; }}
+      .score:focus, .notes:focus, .priority:focus {{ outline:2px solid rgba(0,132,255,.18); border-color:#579bff; }}
+      .staff {{ background:#fffdf4; }}
+      .notes {{ width:190px; padding:9px 10px; border:1px solid #cfd8ea; border-radius:10px; }}
+      .priority {{ padding:8px; border:1px solid #cfd8ea; border-radius:10px; background:#fff; }}
+      .total {{ font-weight:900; text-align:center; color:#24325f; }}
+      .final-badge {{ display:inline-flex; min-width:44px; justify-content:center; border-radius:999px; padding:7px 9px; font-weight:900; }}
+      .final-badge.top {{ background:#dcfce7; color:#166534; }}
+      .final-badge.mid {{ background:#fef3c7; color:#92400e; }}
+      .final-badge.low {{ background:#fee2e2; color:#991b1b; }}
+      .star {{ width:36px; height:36px; border:0; border-radius:50%; cursor:pointer; background:#edf1f7; color:#9aa5bb; font-size:18px; }}
+      .star.active {{ background:#fff1b8; color:#c08400; }}
+      .save-status {{ width:64px; font-size:12px; color:#64748b; }}
+      .side-panel {{ display:flex; flex-direction:column; gap:14px; }}
+      .metric {{ padding:18px; border-bottom:1px solid #edf1f7; }}
+      .metric label {{ display:block; color:#687594; font-size:12px; text-transform:uppercase; font-weight:900; letter-spacing:.05em; }}
+      .metric strong {{ display:block; font-size:34px; margin-top:4px; color:#111f4d; }}
+      .rank-list {{ padding:12px; display:flex; flex-direction:column; gap:9px; }}
+      .rank-card {{ display:grid; grid-template-columns:40px 1fr 48px; gap:10px; align-items:center; padding:11px; border:1px solid #e3e9f4; border-radius:16px; background:#fbfcff; }}
+      .rank-pos {{ width:34px; height:34px; border-radius:12px; display:flex; align-items:center; justify-content:center; background:#111f4d; color:#fff; font-weight:900; }}
+      .rank-card span {{ display:block; color:#74809a; font-size:12px; margin-top:2px; }}
+      .rank-card b {{ text-align:right; font-size:18px; color:#0f766e; }}
+      .mini-help {{ padding:14px 16px; color:#65718d; font-size:13px; line-height:1.45; background:#f8fafc; border-top:1px solid #edf1f7; }}
+      @media(max-width:1050px) {{ .tryouts-grid {{ grid-template-columns:1fr; }} .tryouts-hero h1 {{ font-size:34px; }} }}
+    </style>
+
+    <div class="tryouts-wrap">
+      <div class="tryouts-hero">
+        <div style="display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap;">
+          <div>
+            <h1>Tryouts · Draft Manager</h1>
+            <p>Equipo activo: <strong>{html.escape(board_team or '')}</strong> · valoración rápida de 16 jugadoras sin recargar la pantalla.</p>
+          </div>
+          <div class="tryouts-actions">
+            <a class="light-btn" href="/select-module">Módulos</a>
+            <a class="light-btn" href="/">Draft</a>
+            <a class="light-btn" href="/plantilla">Plantilla</a>
+            <button class="white-btn" type="button" onclick="location.reload()">Recargar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tryouts-grid">
+        <div class="tryouts-card">
+          <div class="tryouts-card-head">
+            <h2>Evaluación rápida</h2>
+            <span class="muted">CON · PRE · CTL · VEL · FIS · STAFF</span>
+          </div>
+          <div class="tryouts-table-wrap">
+            <table class="tryouts-table">
+              <thead>
+                <tr>
+                  <th>#</th><th>Jugadora</th><th>Conducción</th><th>Precisión</th><th>Control</th><th>Velocidad</th><th>Físico</th><th>Staff</th><th>Pruebas</th><th>Final</th><th>Fav</th><th>Prioridad</th><th>Notas</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {''.join(rows)}
+              </tbody>
+            </table>
+          </div>
+          <div class="mini-help">
+            La nota final calcula <strong>80% pruebas + 20% staff</strong>. Se guarda automáticamente al cambiar un dato.
+          </div>
+        </div>
+
+        <div class="side-panel">
+          <div class="tryouts-card">
+            <div class="metric">
+              <label>Líder actual</label>
+              <strong>{html.escape(leader.get('name') if leader else '—')}</strong>
+            </div>
+            <div class="metric">
+              <label>Media final</label>
+              <strong id="avgFinal">{avg}</strong>
+            </div>
+          </div>
+
+          <div class="tryouts-card">
+            <div class="tryouts-card-head"><h2>Top 5</h2></div>
+            <div class="rank-list" id="rankList">
+              {''.join(top_cards)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script id="tryoutsData" type="application/json">{players_json}</script>
+    <script>
+    (function(){{
+      const rows = Array.from(document.querySelectorAll('tr[data-player-id]'));
+      let players = JSON.parse(document.getElementById('tryoutsData').textContent || '[]');
+
+      function clamp(v) {{
+        v = parseFloat(String(v).replace(',', '.'));
+        if (Number.isNaN(v)) return 0;
+        return Math.max(0, Math.min(10, v));
+      }}
+      function esc(v) {{
+        return String(v || '').replace(/[&<>"']/g, s => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}})[s]);
+      }}
+      function calcPruebas(p) {{
+        return Math.round(((clamp(p.con)+clamp(p.pre)+clamp(p.ctl)+clamp(p.vel)+clamp(p.fis))/5)*100)/100;
+      }}
+      function calcFinal(p) {{
+        return Math.round(((calcPruebas(p)*0.8)+(clamp(p.staff)*0.2))*100)/100;
+      }}
+      function badgeClass(v) {{
+        return v >= 8 ? 'top' : (v >= 6 ? 'mid' : 'low');
+      }}
+      function findPlayer(id) {{
+        return players.find(p => Number(p.id) === Number(id));
+      }}
+      function rerenderRanking() {{
+        const ordered = [...players].sort((a,b) => calcFinal(b) - calcFinal(a));
+        const rankList = document.getElementById('rankList');
+        rankList.innerHTML = ordered.slice(0,5).map((p,i)=>`
+          <div class="rank-card">
+            <div class="rank-pos">#${{i+1}}</div>
+            <div><strong>${{esc(p.name)}}</strong><span>${{esc(p.position)}} · Dorsal ${{p.number || ''}}</span></div>
+            <b>${{calcFinal(p)}}</b>
+          </div>`).join('');
+        const avg = ordered.length ? Math.round((ordered.reduce((s,p)=>s+calcFinal(p),0)/ordered.length)*100)/100 : 0;
+        document.getElementById('avgFinal').textContent = avg;
+      }}
+      function updateRow(row, p) {{
+        const total = calcPruebas(p);
+        const final = calcFinal(p);
+        row.querySelector('[data-total]').textContent = total;
+        const badge = row.querySelector('[data-final]');
+        badge.textContent = final;
+        badge.className = 'final-badge ' + badgeClass(final);
+      }}
+      let timers = {{}};
+      function savePlayer(row, p) {{
+        const status = row.querySelector('[data-status]');
+        status.textContent = '...';
+        clearTimeout(timers[p.id]);
+        timers[p.id] = setTimeout(async () => {{
+          try {{
+            const res = await fetch('/tryouts/update', {{
+              method: 'POST',
+              headers: {{'Content-Type':'application/json'}},
+              body: JSON.stringify(p)
+            }});
+            if (!res.ok) throw new Error('Error guardando');
+            status.textContent = 'OK';
+            setTimeout(()=>{{ if(status.textContent === 'OK') status.textContent = ''; }}, 900);
+          }} catch(e) {{
+            status.textContent = 'Error';
+          }}
+        }}, 300);
+      }}
+      rows.forEach(row => {{
+        const id = row.dataset.playerId;
+        const p = findPlayer(id);
+        if (!p) return;
+        row.querySelectorAll('input[data-field]').forEach(input => {{
+          input.addEventListener('input', () => {{
+            const field = input.dataset.field;
+            if (input.type === 'number') p[field] = clamp(input.value);
+            else p[field] = input.value;
+            updateRow(row, p);
+            rerenderRanking();
+            savePlayer(row, p);
+          }});
+        }});
+        row.querySelectorAll('select[data-field]').forEach(select => {{
+          select.addEventListener('change', () => {{
+            p[select.dataset.field] = select.value;
+            savePlayer(row, p);
+          }});
+        }});
+        const star = row.querySelector('.star');
+        star.addEventListener('click', () => {{
+          p.favorite = !p.favorite;
+          star.classList.toggle('active', p.favorite);
+          savePlayer(row, p);
+        }});
+      }});
+    }})();
+    </script>
+    """
+    return page(content)
+
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 UPLOADS_DIR = os.path.join(STATIC_DIR, "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -1093,7 +1457,7 @@ def select_module_page(request: Request):
                 </div>
             </div>
 
-            <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:24px;max-width:920px;margin:0 auto;'>
+            <div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;max-width:1120px;margin:0 auto;'>
                 <div class='card' style='margin:0;text-align:left;border:1px solid #d9e1f0;border-radius:24px;padding:30px;box-shadow:0 12px 26px rgba(19,31,72,.08);'>
                     <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#eef3ff;font-size:28px;margin-bottom:18px;'>📋</div>
                     <h2 style='margin:0 0 12px;font-size:28px;'>Gestión del DRAFT</h2>
@@ -1110,6 +1474,15 @@ def select_module_page(request: Request):
                         Nuevo módulo independiente para la gestión deportiva del equipo y el seguimiento de competición.
                     </div>
                     <a class='btn' style='display:inline-block;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700;' href='/plantilla'>Acceder a Gestión de Plantilla</a>
+                </div>
+
+                <div class='card' style='margin:0;text-align:left;border:1px solid #d9e1f0;border-radius:24px;padding:30px;box-shadow:0 12px 26px rgba(19,31,72,.08);'>
+                    <div style='display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#fff7ed;font-size:28px;margin-bottom:18px;'>⚡</div>
+                    <h2 style='margin:0 0 12px;font-size:28px;'>Tryouts</h2>
+                    <div class='muted' style='margin-bottom:20px;font-size:17px;line-height:1.55;'>
+                        Evaluación ligera para puntuar conducción, precisión, control, velocidad, físico y valoración staff.
+                    </div>
+                    <a class='btn' style='display:inline-block;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700;' href='/tryouts'>Acceder a Tryouts</a>
                 </div>
             </div>
         </div>
