@@ -4243,6 +4243,13 @@ def render_rivals_page(request: Request) -> str:
       .rival-form{{padding:14px;display:grid;gap:10px;border-top:1px solid #edf2fa;}}
       .rival-form input,.rival-form textarea,.clip-form input,.clip-form textarea,.staff-notes textarea{{width:100%;box-sizing:border-box;border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;}}
       .roster-card{{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}}
+      .roster-toggle{{margin:12px;border:1px solid #d7dfec;border-radius:16px;background:#f8fbff;overflow:hidden;}}
+      .roster-toggle summary{{cursor:pointer;padding:12px 14px;font-weight:1000;color:#07122d;list-style:none;display:flex;justify-content:space-between;align-items:center;}}
+      .roster-toggle summary::-webkit-details-marker{{display:none;}}
+      .roster-count{{font-size:12px;font-weight:900;padding:6px 9px;border-radius:999px;background:#e8fff4;color:#047857;}}
+      .add-player-panel{{display:none;gap:6px;align-items:center;flex-wrap:wrap;background:#f8fbff;border:1px solid #d7dfec;border-radius:14px;padding:8px;}}
+      .add-player-panel.open{{display:flex;}}
+      .add-player-panel .player-picker{{flex:1;min-width:220px;}}
       .roster-form{{display:grid;grid-template-columns:80px 1fr 140px auto;gap:8px;padding:12px;border-top:1px solid #edf2fa;background:#f8fbff;}}
       .roster-form input,.player-picker{{border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;box-sizing:border-box;}}
       .roster-table{{width:100%;border-collapse:collapse;}}
@@ -4327,12 +4334,15 @@ def render_rivals_page(request: Request) -> str:
 
           <section class="roster-card" id="rosterSection" style="display:none;">
             <div class="scout-panel-head"><h2>Plantilla rival</h2><span class="save-badge">Dorsal · Jugadora · Posición</span></div>
-            <div style="overflow:auto;">
-              <table class="roster-table">
-                <thead><tr><th>Dorsal</th><th>Jugadora</th><th>Posición</th><th></th></tr></thead>
-                <tbody id="rosterBody"></tbody>
-              </table>
-            </div>
+            <details class="roster-toggle">
+              <summary>Ver / editar jugadoras creadas <span class="roster-count" id="rosterCount">0 jugadoras</span></summary>
+              <div style="overflow:auto;">
+                <table class="roster-table">
+                  <thead><tr><th>Dorsal</th><th>Jugadora</th><th>Posición</th><th></th></tr></thead>
+                  <tbody id="rosterBody"></tbody>
+                </table>
+              </div>
+            </details>
             <div class="roster-form">
               <input id="rosterNumber" placeholder="Dorsal">
               <input id="rosterName" placeholder="Nombre jugadora">
@@ -4345,14 +4355,30 @@ def render_rivals_page(request: Request) -> str:
             <div class="board-card">
               <div class="board-card-head">
                 <h3>⚡ Ataque</h3>
-                <div class="board-tools"><select id="picker-ataque" class="player-picker"></select><button class="mini-btn" onclick="addToken('ataque')">+ Ficha</button><button class="mini-btn" onclick="resetBoard('ataque')">Reset</button></div>
+                <div class="board-tools">
+                  <button class="mini-btn" onclick="togglePicker('ataque')">+ Añadir jugadora</button>
+                  <div id="add-panel-ataque" class="add-player-panel">
+                    <select id="picker-ataque" class="player-picker"></select>
+                    <button class="mini-btn" onclick="addToken('ataque')">Añadir</button>
+                    <button class="mini-btn" onclick="togglePicker('ataque', false)">Cancelar</button>
+                  </div>
+                  <button class="mini-btn" onclick="resetBoard('ataque')">Reset</button>
+                </div>
               </div>
               <div class="pitch" id="pitch-ataque"><div class="mid"></div><div class="circle"></div><div class="box-l"></div><div class="box-r"></div></div>
             </div>
             <div class="board-card">
               <div class="board-card-head">
                 <h3>🛡️ Defensa</h3>
-                <div class="board-tools"><select id="picker-defensa" class="player-picker"></select><button class="mini-btn" onclick="addToken('defensa')">+ Ficha</button><button class="mini-btn" onclick="resetBoard('defensa')">Reset</button></div>
+                <div class="board-tools">
+                  <button class="mini-btn" onclick="togglePicker('defensa')">+ Añadir jugadora</button>
+                  <div id="add-panel-defensa" class="add-player-panel">
+                    <select id="picker-defensa" class="player-picker"></select>
+                    <button class="mini-btn" onclick="addToken('defensa')">Añadir</button>
+                    <button class="mini-btn" onclick="togglePicker('defensa', false)">Cancelar</button>
+                  </div>
+                  <button class="mini-btn" onclick="resetBoard('defensa')">Reset</button>
+                </div>
               </div>
               <div class="pitch" id="pitch-defensa"><div class="mid"></div><div class="circle"></div><div class="box-l"></div><div class="box-r"></div></div>
             </div>
@@ -4470,6 +4496,8 @@ def render_rivals_page(request: Request) -> str:
       function renderRoster(){{
         const r=currentRival(); if(!r) return;
         r.roster = Array.isArray(r.roster) ? r.roster : [];
+        const count=document.getElementById('rosterCount');
+        if(count) count.textContent = r.roster.length + (r.roster.length === 1 ? ' jugadora' : ' jugadoras');
         const body=document.getElementById('rosterBody'); body.innerHTML='';
         if(!r.roster.length){{
           body.innerHTML='<tr><td colspan="4" style="color:#64748b;text-align:center;padding:14px;">Aún no has añadido jugadoras a este rival.</td></tr>';
@@ -4563,6 +4591,12 @@ def render_rivals_page(request: Request) -> str:
         currentRivalId=(data.rivals[0]||{{}}).id || null;
         renderAll(); saveAllNow();
       }}
+      function togglePicker(mode, force){{
+        const panel=document.getElementById('add-panel-'+mode);
+        if(!panel) return;
+        const shouldOpen = (typeof force === 'boolean') ? force : !panel.classList.contains('open');
+        panel.classList.toggle('open', shouldOpen);
+      }}
       function addToken(mode){{
         const p=phaseData(); if(!p) return;
         const tokens=p.boards[mode].tokens;
@@ -4578,7 +4612,10 @@ def render_rivals_page(request: Request) -> str:
           position: rosterPlayer ? String(rosterPlayer.position || '') : '',
           x:50, y:50, color: mode==='ataque'?'#0ea5e9':'#ef4444'
         }});
-        renderBoard(mode); scheduleSave();
+        renderBoard(mode);
+        if(sel) sel.value = '';
+        togglePicker(mode, false);
+        scheduleSave();
       }}
       function removeToken(mode, tokenId){{
         const p=phaseData(); if(!p) return;
