@@ -4593,7 +4593,7 @@ def render_rivals_page(request: Request) -> str:
             <div class="note-card"><h3>Comentarios ataque · ${esc(currentPhase)}</h3><textarea oninput="phaseData().attack_comments=this.value;scheduleSave();">${esc(p.attack_comments||'')}</textarea></div>
             <div class="note-card"><h3>Comentarios defensa · ${esc(currentPhase)}</h3><textarea oninput="phaseData().defense_comments=this.value;scheduleSave();">${esc(p.defense_comments||'')}</textarea></div>
           </section>
-          <section class="clips-card"><h3>Clips de vídeo · ${esc(currentPhase)}</h3><div class="clips-layout"><form class="clip-form" method="post" action="/rivals/upload-clip" enctype="multipart/form-data"><input type="hidden" name="rival_id" value="${attr(r.id)}"><input type="hidden" name="match_id" value="${attr(m.id)}"><input type="hidden" name="phase" value="${attr(currentPhase)}"><input name="title" placeholder="Título clip"><input name="minute" placeholder="Minuto / fase"><textarea name="comment" placeholder="Comentario staff"></textarea><input type="file" name="video" accept="video/*" required><button class="dark-btn" type="submit">Subir clip</button></form><div class="clip-list" id="clipList"></div></div></section>
+          <section class="clips-card"><h3>Clips de vídeo · ${esc(currentPhase)}</h3><div class="clips-layout"><form class="clip-form" method="post" action="/rivals/upload-clip" enctype="multipart/form-data" onsubmit="return prepareClipUpload(this)"><input type="hidden" name="rival_id" value="${attr(r.id)}"><input type="hidden" name="match_id" value="${attr(m.id)}"><input type="hidden" name="phase" value="${attr(currentPhase)}"><input type="hidden" name="state_payload" value=""><input name="title" placeholder="Título clip"><input name="minute" placeholder="Minuto / fase"><textarea name="comment" placeholder="Comentario staff"></textarea><input type="file" name="video" accept="video/*" required><button class="dark-btn" type="submit">Subir clip</button></form><div class="clip-list" id="clipList"></div></div></section>
         `;
         renderPickers(); renderBoard('ataque'); renderBoard('defensa'); renderClips();
       }
@@ -4608,6 +4608,17 @@ def render_rivals_page(request: Request) -> str:
       function onDrag(ev){ if(!drag) return; const pitch=document.getElementById('pitch-'+drag.mode); const rect=pitch.getBoundingClientRect(); let x=((ev.clientX-rect.left)/rect.width)*100; let y=((ev.clientY-rect.top)/rect.height)*100; x=Math.max(4,Math.min(96,x)); y=Math.max(6,Math.min(94,y)); drag.el.style.left=x+'%'; drag.el.style.top=y+'%'; const p=phaseData(); const t=p?.boards?.[drag.mode]?.tokens?.find(t=>t.id===drag.id); if(t){t.x=Number(x.toFixed(2));t.y=Number(y.toFixed(2));} }
       function endDrag(){ window.removeEventListener('pointermove', onDrag); drag=null; scheduleSave(); }
       function renderClips(){ const p=phaseData(); const box=document.getElementById('clipList'); if(!p||!box) return; box.innerHTML=(p.clips||[]).map(c=>`<div class="clip-item"><video src="${attr(c.url)}" controls></video><div><h4>${esc(c.title||'Clip')}</h4><p><strong>${esc(c.minute||'')}</strong></p><p>${esc(c.comment||'')}</p></div></div>`).join('') || '<div class="muted">Sin clips en esta fase.</div>'; }
+      function prepareClipUpload(form){
+        try{
+          const st=document.getElementById('saveStatus');
+          if(st) st.textContent='Preparando clip...';
+          const input=form.querySelector('input[name="state_payload"]');
+          if(input) input.value=JSON.stringify(data);
+          // Guardado preventivo por si el navegador lo permite antes de enviar.
+          fetch('/rivals/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).catch(()=>{});
+        }catch(e){}
+        return true;
+      }
       function scheduleSave(){ const st=document.getElementById('saveStatus'); if(st) st.textContent='Guardando...'; clearTimeout(saveTimer); saveTimer=setTimeout(saveAllNow,500); }
       async function saveAllNow(){
         const st=document.getElementById('saveStatus');
@@ -4669,10 +4680,19 @@ async def rivals_delete(request: Request):
 
 
 @app.post("/rivals/upload-clip")
-async def rivals_upload_clip(request: Request, rival_id: str = Form(...), match_id: str = Form(""), phase: str = Form(...), title: str = Form(""), minute: str = Form(""), comment: str = Form(""), video: UploadFile = File(...)):
+async def rivals_upload_clip(request: Request, rival_id: str = Form(...), match_id: str = Form(""), phase: str = Form(...), title: str = Form(""), minute: str = Form(""), comment: str = Form(""), state_payload: str = Form(""), video: UploadFile = File(...)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
-    data = load_rivals_data()
+    data = None
+    if state_payload:
+        try:
+            posted = json.loads(state_payload)
+            if isinstance(posted, dict):
+                data = _normalize_rivals_data(posted)
+        except Exception:
+            data = None
+    if data is None:
+        data = load_rivals_data()
     rival = next((r for r in data.get("rivals", []) if r.get("id") == rival_id), None)
     if not rival or phase not in RIVAL_PHASES:
         return RedirectResponse("/rivals", status_code=303)
