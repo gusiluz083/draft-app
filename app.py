@@ -4173,17 +4173,7 @@ def _empty_phase_payload():
 
 
 def _default_rivals_data():
-    return {
-        "rivals": [
-            {
-                "id": "rival-demo",
-                "name": "Rival ejemplo",
-                "color": "#ef4444",
-                "general_notes": "Crea aquí cada rival y trabaja sus fases de partido.",
-                "phases": {phase: _empty_phase_payload() for phase in RIVAL_PHASES},
-            }
-        ]
-    }
+    return {"rivals": []}
 
 
 def load_rivals_data():
@@ -4214,8 +4204,8 @@ def load_rivals_data():
             for mode in RIVAL_MODES:
                 rival["phases"][phase]["boards"].setdefault(mode, _default_rival_board(mode))
                 rival["phases"][phase]["boards"][mode].setdefault("tokens", [])
-    if not data["rivals"]:
-        data = _default_rivals_data()
+    # Eliminar el rival de ejemplo de versiones anteriores, si existe.
+    data["rivals"] = [r for r in data.get("rivals", []) if r.get("id") != "rival-demo" and (r.get("name") or "").strip().lower() not in ("rival ejemplo", "rayo de barcelona")]
     return data
 
 
@@ -4254,8 +4244,10 @@ def render_rivals_page(request: Request) -> str:
       .rival-form input,.rival-form textarea,.clip-form input,.clip-form textarea,.staff-notes textarea{{width:100%;box-sizing:border-box;border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;}}
       .main-scout{{display:grid;gap:16px;}}
       .phase-tabs{{display:flex;gap:8px;flex-wrap:wrap;padding:12px;background:#fff;border:1px solid #dfe7f5;border-radius:20px;box-shadow:0 8px 20px rgba(15,23,42,.06);}}
-      .phase-tab{{border:1px solid #d8e1f0;background:#f8fbff;border-radius:999px;padding:10px 14px;font-weight:1000;cursor:pointer;}}
+      .phase-tab{{border:1px solid #b9c7dc;background:#f8fbff;color:#07122d;border-radius:999px;padding:10px 14px;font-weight:1000;cursor:pointer;opacity:1;}}
       .phase-tab.active{{background:#07122d;color:#fff;border-color:#07122d;}}
+      .empty-rivals{{background:#fff;border:1px dashed #b9c7dc;border-radius:24px;padding:26px;text-align:center;color:#475569;box-shadow:0 12px 28px rgba(15,23,42,.06);}}
+      .token-delete{{position:absolute;right:-7px;top:-8px;width:20px;height:20px;border-radius:999px;border:2px solid #fff;background:#dc2626;color:#fff;font-weight:1000;font-size:13px;line-height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(0,0,0,.25);}}
       .phase-title{{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;}}
       .phase-title h2{{margin:0;font-size:28px;}}
       .boards-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;}}
@@ -4321,8 +4313,12 @@ def render_rivals_page(request: Request) -> str:
             <div class="save-badge">Cada fase guarda Ataque + Defensa</div>
           </div>
           <div class="phase-tabs" id="phaseTabs"></div>
+          <div class="empty-rivals" id="emptyRivalsBox" style="display:none;">
+            <h2 style="margin:0 0 8px;color:#07122d;">Añade el primer rival</h2>
+            <p style="margin:0;">No hay equipos de ejemplo. Crea un rival en el panel izquierdo para empezar a trabajar sus fases.</p>
+          </div>
 
-          <section class="boards-grid">
+          <section class="boards-grid" id="boardsGrid">
             <div class="board-card">
               <div class="board-card-head">
                 <h3>⚡ Ataque</h3>
@@ -4339,7 +4335,7 @@ def render_rivals_page(request: Request) -> str:
             </div>
           </section>
 
-          <section class="staff-notes">
+          <section class="staff-notes" id="staffNotesSection">
             <div class="note-card">
               <h3>Comentarios staff · Ataque</h3>
               <textarea id="attackComments" placeholder="Ej: buscar espalda de la dorsal 4, finalizar rápido, evitar pérdidas interiores..."></textarea>
@@ -4350,7 +4346,7 @@ def render_rivals_page(request: Request) -> str:
             </div>
           </section>
 
-          <section class="clips-card">
+          <section class="clips-card" id="clipsSection">
             <h3>🎬 Clips de vídeo de esta fase</h3>
             <div class="clips-layout">
               <form class="clip-form" action="/rivals/upload-clip" method="post" enctype="multipart/form-data">
@@ -4374,14 +4370,14 @@ def render_rivals_page(request: Request) -> str:
     <script>
       let data = JSON.parse(document.getElementById('rivalsData').textContent || '{{"rivals":[]}}');
       const phases = JSON.parse(document.getElementById('rivalPhases').textContent || '[]');
-      let currentRivalId = (data.rivals[0] || {{}}).id;
+      let currentRivalId = (data.rivals[0] || {{}}).id || null;
       let currentPhase = phases[0] || '2vs2';
       let drag = null;
       let saveTimer = null;
 
       function uid(){{ return 'id-' + Math.random().toString(16).slice(2) + '-' + Date.now(); }}
       function currentRival(){{ return data.rivals.find(r => r.id === currentRivalId) || data.rivals[0]; }}
-      function phaseData(){{ const r=currentRival(); return r.phases[currentPhase]; }}
+      function phaseData(){{ const r=currentRival(); return r ? r.phases[currentPhase] : null; }}
       function setStatus(txt){{ document.getElementById('saveStatus').textContent = txt; }}
       function scheduleSave(){{ setStatus('Guardando...'); clearTimeout(saveTimer); saveTimer=setTimeout(saveAllNow, 450); }}
       async function saveAllNow(){{
@@ -4410,9 +4406,11 @@ def render_rivals_page(request: Request) -> str:
         }});
       }}
 
-      function renderAll(){{ ensureShape(); renderRivals(); renderPhases(); renderBoards(); renderNotes(); renderClips(); }}
+      function renderAll(){{ ensureShape(); renderRivals(); renderPhases(); const has=!!currentRival(); document.getElementById('emptyRivalsBox').style.display=has?'none':'block'; document.getElementById('boardsGrid').style.display=has?'grid':'none'; document.getElementById('staffNotesSection').style.display=has?'grid':'none'; document.getElementById('clipsSection').style.display=has?'block':'none'; if(has){{renderBoards(); renderNotes(); renderClips();}} }}
       function renderRivals(){{
+        if(!currentRivalId && data.rivals.length) currentRivalId=data.rivals[0].id;
         const box=document.getElementById('rivalList'); box.innerHTML='';
+        if(!data.rivals.length){{ box.innerHTML='<div class="muted" style="padding:10px;">Sin rivales creados.</div>'; }}
         data.rivals.forEach(r => {{
           const b=document.createElement('button'); b.className='rival-item' + (r.id===currentRivalId?' active':'');
           b.innerHTML = `<div style="display:flex;align-items:center;gap:8px;"><span style="width:12px;height:12px;border-radius:999px;background:${{r.color||'#ef4444'}};display:inline-block;"></span><span>${{escapeHtml(r.name||'Rival')}}</span></div>`;
@@ -4420,7 +4418,7 @@ def render_rivals_page(request: Request) -> str:
           box.appendChild(b);
         }});
         const r=currentRival();
-        document.getElementById('currentTitle').textContent = r ? `${{r.name}} · ${{currentPhase}}` : 'Rivales';
+        document.getElementById('currentTitle').textContent = r ? `${{r.name}} · ${{currentPhase}}` : 'Rivales · Scouting';
         document.getElementById('clipRivalId').value = currentRivalId || '';
         document.getElementById('clipPhase').value = currentPhase;
       }}
@@ -4434,9 +4432,10 @@ def render_rivals_page(request: Request) -> str:
       }}
       function renderBoards(){{ ['ataque','defensa'].forEach(renderBoard); }}
       function renderBoard(mode){{
+        const pData = phaseData(); if(!pData) return;
         const pitch=document.getElementById('pitch-'+mode);
         [...pitch.querySelectorAll('.token')].forEach(el=>el.remove());
-        const board = phaseData().boards[mode];
+        const board = pData.boards[mode];
         board.tokens.forEach(t => {{
           const el=document.createElement('div'); el.className='token'; el.dataset.mode=mode; el.dataset.id=t.id;
           el.style.left=(t.x||50)+'%'; el.style.top=(t.y||50)+'%'; el.style.background=t.color || (mode==='ataque'?'#0ea5e9':'#ef4444');
@@ -4444,20 +4443,25 @@ def render_rivals_page(request: Request) -> str:
           input.oninput=()=>{{ t.number=input.value; scheduleSave(); }};
           input.onclick=(ev)=>ev.stopPropagation(); input.onpointerdown=(ev)=>ev.stopPropagation();
           el.appendChild(input);
+          const del=document.createElement('button'); del.type='button'; del.className='token-delete'; del.textContent='×'; del.title='Eliminar ficha';
+          del.onclick=(ev)=>{{ ev.stopPropagation(); removeToken(mode, t.id); }};
+          del.onpointerdown=(ev)=>ev.stopPropagation();
+          el.appendChild(del);
           el.addEventListener('pointerdown', startDrag);
           pitch.appendChild(el);
         }});
       }}
       function renderNotes(){{
-        const p=phaseData();
+        const p=phaseData(); if(!p) return;
         const a=document.getElementById('attackComments'), d=document.getElementById('defenseComments');
         a.value=p.attack_comments || ''; d.value=p.defense_comments || '';
         a.oninput=()=>{{ p.attack_comments=a.value; scheduleSave(); }};
         d.oninput=()=>{{ p.defense_comments=d.value; scheduleSave(); }};
       }}
       function renderClips(){{
+        const pData=phaseData(); if(!pData) return;
         const box=document.getElementById('clipList'); box.innerHTML='';
-        const clips=phaseData().clips || [];
+        const clips=pData.clips || [];
         if(!clips.length){{ box.innerHTML='<div class="muted">Aún no hay clips para esta fase.</div>'; return; }}
         clips.forEach(c=>{{
           const div=document.createElement('div'); div.className='clip-item';
@@ -4476,14 +4480,19 @@ def render_rivals_page(request: Request) -> str:
         scheduleSave(); renderAll();
       }}
       function addToken(mode){{
-        const p=phaseData();
+        const p=phaseData(); if(!p) return;
         const tokens=p.boards[mode].tokens;
         tokens.push({{id:uid(), number:String(tokens.length+1), x:50, y:50, color: mode==='ataque'?'#0ea5e9':'#ef4444'}});
         renderBoard(mode); scheduleSave();
       }}
+      function removeToken(mode, tokenId){{
+        const p=phaseData(); if(!p) return;
+        p.boards[mode].tokens = (p.boards[mode].tokens||[]).filter(t=>t.id!==tokenId);
+        renderBoard(mode); scheduleSave();
+      }}
       function resetBoard(mode){{
         if(!confirm('¿Resetear la pizarra de '+mode+' en '+currentPhase+'?')) return;
-        phaseData().boards[mode].tokens=[]; renderBoard(mode); scheduleSave();
+        const p=phaseData(); if(!p) return; p.boards[mode].tokens=[]; renderBoard(mode); scheduleSave();
       }}
       function startDrag(ev){{
         const el=ev.currentTarget;
@@ -4499,7 +4508,7 @@ def render_rivals_page(request: Request) -> str:
         let x=((ev.clientX-rect.left)/rect.width)*100; let y=((ev.clientY-rect.top)/rect.height)*100;
         x=Math.max(3,Math.min(97,x)); y=Math.max(5,Math.min(95,y));
         drag.el.style.left=x+'%'; drag.el.style.top=y+'%';
-        const t=phaseData().boards[drag.mode].tokens.find(t=>t.id===drag.id); if(t){{t.x=Number(x.toFixed(2));t.y=Number(y.toFixed(2));}}
+        const p=phaseData(); const t=p ? p.boards[drag.mode].tokens.find(t=>t.id===drag.id) : null; if(t){{t.x=Number(x.toFixed(2));t.y=Number(y.toFixed(2));}}
       }}
       function endDrag(){{ window.removeEventListener('pointermove', onDrag); drag=null; scheduleSave(); }}
       function escapeHtml(s){{ return String(s||'').replace(/[&<>'"]/g, c=>({{'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}}[c])); }}
