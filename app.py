@@ -4216,16 +4216,7 @@ def _normalize_match_payload(match):
     return match
 
 
-def load_rivals_data():
-    if not os.path.exists(RIVALS_FILE):
-        data = _default_rivals_data()
-        save_rivals_data(data)
-        return data
-    try:
-        with open(RIVALS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = _default_rivals_data()
+def _normalize_rivals_data(data):
     if not isinstance(data, dict):
         data = _default_rivals_data()
     data.setdefault("rivals", [])
@@ -4256,7 +4247,6 @@ def load_rivals_data():
             clean_roster.append(player)
         rival["roster"] = clean_roster
 
-        # Migración segura: si existía el análisis antiguo directamente en rival["phases"], lo convertimos en un partido heredado.
         legacy_phases = rival.get("phases") if isinstance(rival.get("phases"), dict) else None
         rival.setdefault("matches", [])
         if not isinstance(rival.get("matches"), list):
@@ -4274,9 +4264,90 @@ def load_rivals_data():
     return data
 
 
+def _get_rivals_db_conn():
+    return psycopg2.connect(DATABASE_URL)
+
+
+def _ensure_rivals_store_table(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_kv_store (
+            key TEXT PRIMARY KEY,
+            value JSONB NOT NULL,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+
+
+def _load_rivals_data_from_file():
+    if not os.path.exists(RIVALS_FILE):
+        return _default_rivals_data()
+    try:
+        with open(RIVALS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return _default_rivals_data()
+
+
+def load_rivals_data():
+    # Primero intenta cargar desde PostgreSQL, que es persistente en Render.
+    try:
+        conn = _get_rivals_db_conn()
+        cur = conn.cursor()
+        _ensure_rivals_store_table(cur)
+        cur.execute("SELECT value FROM app_kv_store WHERE key = %s", ("rivals_scouting_data",))
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        if row and row[0]:
+            return _normalize_rivals_data(row[0])
+    except Exception:
+        pass
+
+    # Respaldo: JSON local, por si la DB falla temporalmente.
+    data = _load_rivals_data_from_file()
+    data = _normalize_rivals_data(data)
+    try:
+        save_rivals_data(data)
+    except Exception:
+        pass
+    return data
+
+
 def save_rivals_data(data):
-    with open(RIVALS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data if isinstance(data, dict) else _default_rivals_data(), f, ensure_ascii=False, indent=2)
+    data = _normalize_rivals_data(data if isinstance(data, dict) else _default_rivals_data())
+
+    # Guardado principal persistente en PostgreSQL.
+    db_saved = False
+    try:
+        conn = _get_rivals_db_conn()
+        cur = conn.cursor()
+        _ensure_rivals_store_table(cur)
+        cur.execute(
+            """
+            INSERT INTO app_kv_store (key, value, updated_at)
+            VALUES (%s, %s::jsonb, NOW())
+            ON CONFLICT (key)
+            DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            ("rivals_scouting_data", json.dumps(data, ensure_ascii=False)),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        db_saved = True
+    except Exception:
+        db_saved = False
+
+    # Guardado de respaldo local.
+    try:
+        with open(RIVALS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        if not db_saved:
+            raise
+
+    return True
 
 
 def _safe_filename(name: str) -> str:
@@ -4538,7 +4609,22 @@ def render_rivals_page(request: Request) -> str:
       function endDrag(){ window.removeEventListener('pointermove', onDrag); drag=null; scheduleSave(); }
       function renderClips(){ const p=phaseData(); const box=document.getElementById('clipList'); if(!p||!box) return; box.innerHTML=(p.clips||[]).map(c=>`<div class="clip-item"><video src="${attr(c.url)}" controls></video><div><h4>${esc(c.title||'Clip')}</h4><p><strong>${esc(c.minute||'')}</strong></p><p>${esc(c.comment||'')}</p></div></div>`).join('') || '<div class="muted">Sin clips en esta fase.</div>'; }
       function scheduleSave(){ const st=document.getElementById('saveStatus'); if(st) st.textContent='Guardando...'; clearTimeout(saveTimer); saveTimer=setTimeout(saveAllNow,500); }
-      async function saveAllNow(){ const st=document.getElementById('saveStatus'); if(st) st.textContent='Guardando...'; try{ const res=await fetch('/rivals/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}); if(!res.ok) throw new Error('save'); if(st) st.textContent='Guardado'; setTimeout(()=>{if(st) st.textContent='Listo';},900); }catch(e){ if(st) st.textContent='Error'; alert('No se ha podido guardar.'); } }
+      async function saveAllNow(){
+        const st=document.getElementById('saveStatus');
+        if(st) st.textContent='Guardando...';
+        try{
+          const res=await fetch('/rivals/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+          const payload=await res.json().catch(()=>({}));
+          if(!res.ok || payload.ok===false) throw new Error(payload.error || 'save');
+          if(st) st.textContent='Guardado ✔';
+          setTimeout(()=>{if(st) st.textContent='Listo';},1100);
+          return true;
+        }catch(e){
+          if(st) st.textContent='Error guardado';
+          alert('No se ha podido guardar: '+(e.message||e));
+          return false;
+        }
+      }
       renderAll();
     </script>
     """
