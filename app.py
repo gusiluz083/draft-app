@@ -2857,7 +2857,7 @@ def delete_user(user_id: int, request: Request):
 @app.post("/add")
 def add(request: Request, name: str = Form(...), team: str = Form(""), position: str = Form(""), status: str = Form("Disponible"), notes: str = Form("")):
     if not require_user(request):
-        return RedirectResponse("/login", status_code=303)
+        return JSONResponse({"ok": False, "error": "No autorizado"}, status_code=401)
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("INSERT INTO players (name, team, position, status, notes) VALUES (%s,%s,%s,%s,%s)", (name.strip(), team.strip(), position.strip(), status, notes.strip()))
@@ -4227,7 +4227,7 @@ def _normalize_rivals_data(data):
     for rival in data["rivals"]:
         if not isinstance(rival, dict):
             continue
-        if rival.get("id") == "rival-demo" or (rival.get("name") or "").strip().lower() in ("rival ejemplo", "rayo de barcelona"):
+        if rival.get("id") == "rival-demo" or (rival.get("name") or "").strip().lower() in ("rival ejemplo",):
             continue
         rival.setdefault("id", str(uuid.uuid4()))
         rival.setdefault("name", "Rival")
@@ -4593,7 +4593,7 @@ def render_rivals_page(request: Request) -> str:
             <div class="note-card"><h3>Comentarios ataque · ${esc(currentPhase)}</h3><textarea oninput="phaseData().attack_comments=this.value;scheduleSave();">${esc(p.attack_comments||'')}</textarea></div>
             <div class="note-card"><h3>Comentarios defensa · ${esc(currentPhase)}</h3><textarea oninput="phaseData().defense_comments=this.value;scheduleSave();">${esc(p.defense_comments||'')}</textarea></div>
           </section>
-          <section class="clips-card"><h3>Clips de vídeo · ${esc(currentPhase)}</h3><div class="clips-layout"><form class="clip-form" method="post" action="/rivals/upload-clip" enctype="multipart/form-data" onsubmit="return prepareClipUpload(this)"><input type="hidden" name="rival_id" value="${attr(r.id)}"><input type="hidden" name="match_id" value="${attr(m.id)}"><input type="hidden" name="phase" value="${attr(currentPhase)}"><input type="hidden" name="state_payload" value=""><input name="title" placeholder="Título clip"><input name="minute" placeholder="Minuto / fase"><textarea name="comment" placeholder="Comentario staff"></textarea><input type="file" name="video" accept="video/*" required><button class="dark-btn" type="submit">Subir clip</button></form><div class="clip-list" id="clipList"></div></div></section>
+          <section class="clips-card"><h3>Clips de vídeo · ${esc(currentPhase)}</h3><div class="clips-layout"><form class="clip-form" method="post" action="/rivals/upload-clip" enctype="multipart/form-data" onsubmit="return uploadClipAjax(this)"><input type="hidden" name="rival_id" value="${attr(r.id)}"><input type="hidden" name="match_id" value="${attr(m.id)}"><input type="hidden" name="phase" value="${attr(currentPhase)}"><input type="hidden" name="state_payload" value=""><input name="title" placeholder="Título clip"><input name="minute" placeholder="Minuto / fase"><textarea name="comment" placeholder="Comentario staff"></textarea><input type="file" name="video" accept="video/*" required><button class="dark-btn" type="submit">Subir clip</button></form><div class="clip-list" id="clipList"></div></div></section>
         `;
         renderPickers(); renderBoard('ataque'); renderBoard('defensa'); renderClips();
       }
@@ -4610,14 +4610,33 @@ def render_rivals_page(request: Request) -> str:
       function renderClips(){ const p=phaseData(); const box=document.getElementById('clipList'); if(!p||!box) return; box.innerHTML=(p.clips||[]).map(c=>`<div class="clip-item"><video src="${attr(c.url)}" controls></video><div><h4>${esc(c.title||'Clip')}</h4><p><strong>${esc(c.minute||'')}</strong></p><p>${esc(c.comment||'')}</p></div></div>`).join('') || '<div class="muted">Sin clips en esta fase.</div>'; }
       function prepareClipUpload(form){
         try{
-          const st=document.getElementById('saveStatus');
-          if(st) st.textContent='Preparando clip...';
           const input=form.querySelector('input[name="state_payload"]');
           if(input) input.value=JSON.stringify(data);
-          // Guardado preventivo por si el navegador lo permite antes de enviar.
-          fetch('/rivals/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).catch(()=>{});
         }catch(e){}
         return true;
+      }
+      async function uploadClipAjax(form){
+        const st=document.getElementById('saveStatus');
+        try{
+          if(st) st.textContent='Subiendo clip...';
+          const input=form.querySelector('input[name="state_payload"]');
+          if(input) input.value=JSON.stringify(data);
+          const fd=new FormData(form);
+          const res=await fetch('/rivals/upload-clip',{method:'POST',body:fd});
+          const payload=await res.json().catch(()=>({}));
+          if(!res.ok || payload.ok===false) throw new Error(payload.error || 'upload');
+          if(payload.data){
+            data = payload.data;
+          }
+          if(st) st.textContent='Clip guardado ✔';
+          renderAll();
+          setTimeout(()=>{ if(st) st.textContent='Listo'; }, 1000);
+          return false;
+        }catch(e){
+          if(st) st.textContent='Error clip';
+          alert('No se ha podido subir el clip: '+(e.message||e));
+          return false;
+        }
       }
       function scheduleSave(){ const st=document.getElementById('saveStatus'); if(st) st.textContent='Guardando...'; clearTimeout(saveTimer); saveTimer=setTimeout(saveAllNow,500); }
       async function saveAllNow(){
@@ -4695,7 +4714,7 @@ async def rivals_upload_clip(request: Request, rival_id: str = Form(...), match_
         data = load_rivals_data()
     rival = next((r for r in data.get("rivals", []) if r.get("id") == rival_id), None)
     if not rival or phase not in RIVAL_PHASES:
-        return RedirectResponse("/rivals", status_code=303)
+        return JSONResponse({"ok": False, "error": "Rival o fase inválidos"}, status_code=400)
     rival.setdefault("matches", [])
     match = next((m for m in rival.get("matches", []) if m.get("id") == match_id), None)
     if not match:
@@ -4718,4 +4737,4 @@ async def rivals_upload_clip(request: Request, rival_id: str = Form(...), match_
     }
     match.setdefault("phases", {}).setdefault(phase, _empty_phase_payload()).setdefault("clips", []).append(clip)
     save_rivals_data(data)
-    return RedirectResponse("/rivals", status_code=303)
+    return JSONResponse({"ok": True, "data": data})
