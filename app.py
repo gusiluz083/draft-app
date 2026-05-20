@@ -279,7 +279,7 @@ def render_tryouts_page(request: Request) -> str:
       .rank-pos {{ width:34px; height:34px; border-radius:12px; display:flex; align-items:center; justify-content:center; background:#111f4d; color:#fff; font-weight:900; }}
       .rank-card span {{ display:block; color:#74809a; font-size:12px; margin-top:2px; }}
       .rank-card b {{ text-align:right; font-size:18px; color:#0f766e; }}
-      .mini-help {{ padding:14px 16px; color:#65718d; font-size:13px; line-height:1.45; background:#f8fafc; border-top:1px solid #edf1f7; }}
+      .mini-help {{ padding:14px 16px; color:#65718d; font-size:16px; line-height:1.45; background:#f8fafc; border-top:1px solid #edf1f7; }}
       @media(max-width:1050px) {{ .tryouts-grid {{ grid-template-columns:1fr; }} .tryouts-hero h1 {{ font-size:34px; }} }}
     </style>
 
@@ -762,10 +762,10 @@ th a { color:#0f172a; text-decoration:none; font-weight:700; }
 .board-player input { width:100%; padding:8px 10px; text-align:center; background:rgba(255,255,255,.95); border:1px solid #cbd5e1; border-radius:999px; font-size:14px; font-weight:800; }
 .board-side-list { display:flex; flex-direction:column; gap:10px; max-height:760px; overflow:auto; }
 .board-side-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:12px; background:#f8fafc; }
-.board-side-item strong { font-size:13px; }
+.board-side-item strong { font-size:16px; }
 .board-side-item .mini-meta { display:block; margin-top:2px; color:#64748b; font-size:12px; }
 .board-source-group { margin-top:14px; }
-.board-source-group h4 { margin:0 0 8px; font-size:13px; }
+.board-source-group h4 { margin:0 0 8px; font-size:16px; }
 .board-source-list { display:flex; flex-direction:column; gap:8px; max-height:220px; overflow:auto; }
 .board-source-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
 .board-empty { color:#64748b; font-size:14px; }
@@ -1896,7 +1896,7 @@ def plantilla_layout(request: Request, board_team: str, active: str, body: str) 
     .player-name{font-size:24px;font-weight:800;line-height:1.1;color:#1f2937;margin-bottom:6px;}
     .player-subtitle{font-size:14px;color:#6b7280;font-weight:700;}
     .player-card-actions{margin-top:14px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
-    .mini-btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:999px;background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;text-decoration:none;font-weight:800;font-size:13px;box-shadow:0 8px 18px rgba(27,47,99,0.22);border:1px solid transparent;transition:all .18s ease;}
+    .mini-btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:999px;background:linear-gradient(135deg,#1b2f63 0%,#274690 100%);color:#fff;text-decoration:none;font-weight:800;font-size:16px;box-shadow:0 8px 18px rgba(27,47,99,0.22);border:1px solid transparent;transition:all .18s ease;}
     .mini-btn:hover{opacity:.95;transform:translateY(-1px);}
     .mini-btn-light{background:#ffffff;color:#1b2f63;border-color:#dbe3f0;box-shadow:0 8px 18px rgba(15,23,42,0.08);}
     .mini-btn-light:hover{background:#f8fbff;}
@@ -4250,6 +4250,9 @@ def render_rivals_page(request: Request) -> str:
       .add-player-panel{{display:none;gap:6px;align-items:center;flex-wrap:wrap;background:#f8fbff;border:1px solid #d7dfec;border-radius:14px;padding:8px;}}
       .add-player-panel.open{{display:flex;}}
       .add-player-panel .player-picker{{flex:1;min-width:220px;}}
+      .token,.player-token,.board-token,.piece{{width:52px!important;height:52px!important;min-width:52px!important;min-height:52px!important;border-radius:999px!important;display:flex!important;align-items:center!important;justify-content:center!important;font-weight:1000!important;font-size:18px!important;line-height:1!important;cursor:grab!important;touch-action:none!important;user-select:none!important;box-shadow:0 6px 14px rgba(0,0,0,.22)!important;}}
+      .token:active,.player-token:active,.board-token:active,.piece:active{{cursor:grabbing!important;transform:scale(1.04);}}
+      .token .token-number,.player-token .token-number,.board-token .token-number,.piece .token-number{{font-size:18px!important;font-weight:1000!important;pointer-events:none;}}
       .roster-form{{display:grid;grid-template-columns:80px 1fr 140px auto;gap:8px;padding:12px;border-top:1px solid #edf2fa;background:#f8fbff;}}
       .roster-form input,.player-picker{{border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;box-sizing:border-box;}}
       .roster-table{{width:100%;border-collapse:collapse;}}
@@ -4262,7 +4265,7 @@ def render_rivals_page(request: Request) -> str:
       .phase-tab{{border:1px solid #b9c7dc;background:#f8fbff;color:#07122d;border-radius:999px;padding:10px 14px;font-weight:1000;cursor:pointer;opacity:1;}}
       .phase-tab.active{{background:#07122d;color:#fff;border-color:#07122d;}}
       .empty-rivals{{background:#fff;border:1px dashed #b9c7dc;border-radius:24px;padding:26px;text-align:center;color:#475569;box-shadow:0 12px 28px rgba(15,23,42,.06);}}
-      .token-delete{{position:absolute;right:-7px;top:-8px;width:20px;height:20px;border-radius:999px;border:2px solid #fff;background:#dc2626;color:#fff;font-weight:1000;font-size:13px;line-height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(0,0,0,.25);}}
+      .token-delete{{position:absolute;right:-7px;top:-8px;width:20px;height:20px;border-radius:999px;border:2px solid #fff;background:#dc2626;color:#fff;font-weight:1000;font-size:16px;line-height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(0,0,0,.25);}}
       .phase-title{{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;}}
       .phase-title h2{{margin:0;font-size:28px;}}
       .boards-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;}}
