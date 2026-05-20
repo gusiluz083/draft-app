@@ -4238,6 +4238,8 @@ def render_rivals_page(request: Request) -> str:
       .rival-list{{padding:12px;display:grid;gap:10px;}}
       .rival-item{{width:100%;border:1px solid #e5eaf4;border-radius:16px;background:#f8fbff;padding:12px;text-align:left;cursor:pointer;font-weight:900;}}
       .rival-item.active{{background:#07122d;color:#fff;border-color:#07122d;}}
+      .rival-row{{display:grid;grid-template-columns:1fr 38px;gap:8px;align-items:center;}}
+      .rival-delete{{height:42px;border:0;border-radius:13px;background:#fee2e2;color:#991b1b;font-weight:1000;cursor:pointer;}}
       .rival-form{{padding:14px;display:grid;gap:10px;border-top:1px solid #edf2fa;}}
       .rival-form input,.rival-form textarea,.clip-form input,.clip-form textarea,.staff-notes textarea{{width:100%;box-sizing:border-box;border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;}}
       .roster-card{{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}}
@@ -4397,19 +4399,28 @@ def render_rivals_page(request: Request) -> str:
       let saveTimer = null;
 
       function uid(){{ return 'id-' + Math.random().toString(16).slice(2) + '-' + Date.now(); }}
-      function currentRival(){{ return data.rivals.find(r => r.id === currentRivalId) || data.rivals[0]; }}
+      function currentRival(){{ return (data.rivals||[]).find(r => r.id === currentRivalId) || null; }}
       function phaseData(){{ const r=currentRival(); return r ? r.phases[currentPhase] : null; }}
       function setStatus(txt){{ document.getElementById('saveStatus').textContent = txt; }}
       function scheduleSave(){{ setStatus('Guardando...'); clearTimeout(saveTimer); saveTimer=setTimeout(saveAllNow, 450); }}
       async function saveAllNow(){{
+        ensureShape();
         setStatus('Guardando...');
         try{{
-          const res = await fetch('/rivals/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data)}});
-          if(!res.ok) throw new Error('save failed');
+          const res = await fetch('/rivals/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data), keepalive:true}});
+          const out = await res.json().catch(()=>({{ok:false}}));
+          if(!res.ok || out.ok === false) throw new Error(out.error || 'save failed');
           setStatus('Guardado');
           setTimeout(()=>setStatus('Listo'), 900);
-        }}catch(e){{ setStatus('Error'); console.error(e); }}
+          return true;
+        }}catch(e){{ setStatus('Error'); console.error(e); return false; }}
       }}
+      window.addEventListener('beforeunload', () => {{
+        try {{
+          ensureShape();
+          fetch('/rivals/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data), keepalive:true}});
+        }} catch(e) {{}}
+      }});
 
       function ensureShape(){{
         data.rivals = data.rivals || [];
@@ -4435,10 +4446,13 @@ def render_rivals_page(request: Request) -> str:
         const box=document.getElementById('rivalList'); box.innerHTML='';
         if(!data.rivals.length){{ box.innerHTML='<div class="muted" style="padding:10px;">Sin rivales creados.</div>'; }}
         data.rivals.forEach(r => {{
+          const row=document.createElement('div'); row.className='rival-row';
           const b=document.createElement('button'); b.className='rival-item' + (r.id===currentRivalId?' active':'');
           b.innerHTML = `<div style="display:flex;align-items:center;gap:8px;"><span>${{escapeHtml(r.name||'Rival')}}</span></div>`;
           b.onclick=()=>{{currentRivalId=r.id; renderAll();}};
-          box.appendChild(b);
+          const del=document.createElement('button'); del.type='button'; del.className='rival-delete'; del.textContent='×'; del.title='Eliminar rival';
+          del.onclick=(ev)=>{{ ev.stopPropagation(); deleteRival(r.id); }};
+          row.appendChild(b); row.appendChild(del); box.appendChild(row);
         }});
         const r=currentRival();
         document.getElementById('currentTitle').textContent = r ? `${{r.name}} · ${{currentPhase}}` : 'Rivales · Scouting';
@@ -4484,12 +4498,12 @@ def render_rivals_page(request: Request) -> str:
         r.roster = Array.isArray(r.roster) ? r.roster : [];
         r.roster.push({{id:uid(), number, name, position}});
         document.getElementById('rosterNumber').value=''; document.getElementById('rosterName').value=''; document.getElementById('rosterPosition').value='';
-        renderRoster(); scheduleSave();
+        renderRoster(); saveAllNow();
       }}
       function removeRosterPlayer(id){{
         const r=currentRival(); if(!r) return;
         r.roster=(r.roster||[]).filter(p=>p.id!==id);
-        renderRoster(); scheduleSave();
+        renderRoster(); saveAllNow();
       }}
       function renderBoards(){{ ['ataque','defensa'].forEach(renderBoard); }}
       function renderBoard(mode){{
@@ -4539,7 +4553,15 @@ def render_rivals_page(request: Request) -> str:
         data.rivals.push({{id:uid(), name, color, general_notes:'', roster:[], phases:phasesObj}});
         currentRivalId=data.rivals[data.rivals.length-1].id;
         document.getElementById('newRivalName').value='';
-        scheduleSave(); renderAll();
+        renderAll(); saveAllNow();
+      }}
+      function deleteRival(id){{
+        const r=(data.rivals||[]).find(x=>x.id===id);
+        if(!r) return;
+        if(!confirm('¿Eliminar el equipo rival "' + (r.name||'Rival') + '" y todos sus clips/pizarras?')) return;
+        data.rivals=(data.rivals||[]).filter(x=>x.id!==id);
+        currentRivalId=(data.rivals[0]||{{}}).id || null;
+        renderAll(); saveAllNow();
       }}
       function addToken(mode){{
         const p=phaseData(); if(!p) return;
@@ -4608,6 +4630,21 @@ async def rivals_save(request: Request):
             raise ValueError("payload inválido")
         payload.setdefault("rivals", [])
         save_rivals_data(payload)
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
+@app.post("/rivals/delete")
+async def rivals_delete(request: Request):
+    if not require_user(request):
+        return JSONResponse({"ok": False, "error": "No autorizado"}, status_code=401)
+    try:
+        payload = await request.json()
+        rival_id = (payload or {}).get("rival_id")
+        data = load_rivals_data()
+        data["rivals"] = [r for r in data.get("rivals", []) if r.get("id") != rival_id]
+        save_rivals_data(data)
         return JSONResponse({"ok": True})
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
