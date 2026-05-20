@@ -4135,8 +4135,9 @@ def new_player_to_preselection(player_id: int, request: Request):
         cur.close(); conn.close()
     return RedirectResponse("/?tab=objectives", status_code=303)
 
+
 # =========================
-# RIVALES / SCOUTING - módulo aislado
+# RIVALES / SCOUTING - módulo aislado v2: Rivales → Partidos → Análisis
 # =========================
 RIVALS_FILE = os.path.join(BASE_DIR, "rivals_scouting_data.json")
 RIVALS_UPLOADS_DIR = os.path.join(UPLOADS_DIR, "rivals")
@@ -4161,8 +4162,58 @@ def _empty_phase_payload():
     }
 
 
+def _empty_match_payload(title: str = "Partido analizado"):
+    return {
+        "id": str(uuid.uuid4()),
+        "title": title,
+        "date": "",
+        "competition": "",
+        "result": "",
+        "notes": "",
+        "phases": {phase: _empty_phase_payload() for phase in RIVAL_PHASES},
+    }
+
+
 def _default_rivals_data():
     return {"rivals": []}
+
+
+def _normalize_phase_payload(payload):
+    if not isinstance(payload, dict):
+        payload = _empty_phase_payload()
+    payload.setdefault("attack_comments", "")
+    payload.setdefault("defense_comments", "")
+    payload.setdefault("clips", [])
+    if not isinstance(payload.get("clips"), list):
+        payload["clips"] = []
+    payload.setdefault("boards", {})
+    if not isinstance(payload.get("boards"), dict):
+        payload["boards"] = {}
+    for mode in RIVAL_MODES:
+        payload["boards"].setdefault(mode, _default_rival_board(mode))
+        if not isinstance(payload["boards"].get(mode), dict):
+            payload["boards"][mode] = _default_rival_board(mode)
+        payload["boards"][mode].setdefault("tokens", [])
+        if not isinstance(payload["boards"][mode].get("tokens"), list):
+            payload["boards"][mode]["tokens"] = []
+    return payload
+
+
+def _normalize_match_payload(match):
+    if not isinstance(match, dict):
+        match = _empty_match_payload()
+    match.setdefault("id", str(uuid.uuid4()))
+    match.setdefault("title", "Partido analizado")
+    match.setdefault("date", "")
+    match.setdefault("competition", "")
+    match.setdefault("result", "")
+    match.setdefault("notes", "")
+    match.setdefault("phases", {})
+    if not isinstance(match.get("phases"), dict):
+        match["phases"] = {}
+    for phase in RIVAL_PHASES:
+        match["phases"][phase] = _normalize_phase_payload(match["phases"].get(phase, _empty_phase_payload()))
+    return match
 
 
 def load_rivals_data():
@@ -4178,7 +4229,15 @@ def load_rivals_data():
     if not isinstance(data, dict):
         data = _default_rivals_data()
     data.setdefault("rivals", [])
+    if not isinstance(data.get("rivals"), list):
+        data["rivals"] = []
+
+    normalized_rivals = []
     for rival in data["rivals"]:
+        if not isinstance(rival, dict):
+            continue
+        if rival.get("id") == "rival-demo" or (rival.get("name") or "").strip().lower() in ("rival ejemplo", "rayo de barcelona"):
+            continue
         rival.setdefault("id", str(uuid.uuid4()))
         rival.setdefault("name", "Rival")
         rival.setdefault("color", "#ef4444")
@@ -4186,30 +4245,38 @@ def load_rivals_data():
         rival.setdefault("roster", [])
         if not isinstance(rival.get("roster"), list):
             rival["roster"] = []
+        clean_roster = []
         for player in rival["roster"]:
-            if isinstance(player, dict):
-                player.setdefault("id", str(uuid.uuid4()))
-                player.setdefault("number", "")
-                player.setdefault("name", "")
-                player.setdefault("position", "")
-        rival.setdefault("phases", {})
-        for phase in RIVAL_PHASES:
-            rival["phases"].setdefault(phase, _empty_phase_payload())
-            rival["phases"][phase].setdefault("attack_comments", "")
-            rival["phases"][phase].setdefault("defense_comments", "")
-            rival["phases"][phase].setdefault("clips", [])
-            rival["phases"][phase].setdefault("boards", {})
-            for mode in RIVAL_MODES:
-                rival["phases"][phase]["boards"].setdefault(mode, _default_rival_board(mode))
-                rival["phases"][phase]["boards"][mode].setdefault("tokens", [])
-    # Eliminar el rival de ejemplo de versiones anteriores, si existe.
-    data["rivals"] = [r for r in data.get("rivals", []) if r.get("id") != "rival-demo" and (r.get("name") or "").strip().lower() not in ("rival ejemplo", "rayo de barcelona")]
+            if not isinstance(player, dict):
+                continue
+            player.setdefault("id", str(uuid.uuid4()))
+            player.setdefault("number", "")
+            player.setdefault("name", "")
+            player.setdefault("position", "")
+            clean_roster.append(player)
+        rival["roster"] = clean_roster
+
+        # Migración segura: si existía el análisis antiguo directamente en rival["phases"], lo convertimos en un partido heredado.
+        legacy_phases = rival.get("phases") if isinstance(rival.get("phases"), dict) else None
+        rival.setdefault("matches", [])
+        if not isinstance(rival.get("matches"), list):
+            rival["matches"] = []
+        if legacy_phases and not rival["matches"]:
+            migrated = _empty_match_payload("Partido heredado")
+            for phase in RIVAL_PHASES:
+                if phase in legacy_phases:
+                    migrated["phases"][phase] = _normalize_phase_payload(legacy_phases.get(phase))
+            rival["matches"].append(migrated)
+        rival.pop("phases", None)
+        rival["matches"] = [_normalize_match_payload(m) for m in rival.get("matches", []) if isinstance(m, dict)]
+        normalized_rivals.append(rival)
+    data["rivals"] = normalized_rivals
     return data
 
 
 def save_rivals_data(data):
     with open(RIVALS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(data if isinstance(data, dict) else _default_rivals_data(), f, ensure_ascii=False, indent=2)
 
 
 def _safe_filename(name: str) -> str:
@@ -4221,81 +4288,80 @@ def render_rivals_page(request: Request) -> str:
     data = load_rivals_data()
     data_json = html.escape(json.dumps(data, ensure_ascii=False), quote=False)
     phases_json = html.escape(json.dumps(RIVAL_PHASES, ensure_ascii=False), quote=False)
-    return f"""
+    template = """
     <style>
-      .scout-wrap{{padding:22px 0 38px;color:#0f172a;}}
-      .scout-hero{{border-radius:30px;padding:26px;background:radial-gradient(circle at top left,#38bdf8 0,#12204a 38%,#050816 100%);color:white;box-shadow:0 20px 46px rgba(2,8,23,.24);margin-bottom:18px;}}
-      .scout-hero h1{{margin:0;font-size:42px;line-height:1;}}
-      .scout-hero p{{margin:8px 0 0;opacity:.9;font-size:16px;}}
-      .scout-actions{{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}}
-      .scout-actions a,.scout-actions button,.scout-btn{{border:0;border-radius:13px;padding:11px 14px;font-weight:900;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:8px;}}
-      .scout-primary{{background:#fff;color:#07122d;}}
-      .scout-secondary{{background:rgba(255,255,255,.13);color:#fff;border:1px solid rgba(255,255,255,.22)!important;}}
-      .scout-grid{{display:grid;grid-template-columns:280px 1fr;gap:18px;align-items:start;}}
-      .scout-panel{{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}}
-      .scout-panel-head{{padding:15px 17px;border-bottom:1px solid #e8eef8;display:flex;justify-content:space-between;gap:10px;align-items:center;}}
-      .scout-panel-head h2{{margin:0;font-size:18px;}}
-      .rival-list{{padding:12px;display:grid;gap:10px;}}
-      .rival-item{{width:100%;border:1px solid #e5eaf4;border-radius:16px;background:#f8fbff;padding:12px;text-align:left;cursor:pointer;font-weight:900;}}
-      .rival-item.active{{background:#07122d;color:#fff;border-color:#07122d;}}
-      .rival-row{{display:grid;grid-template-columns:1fr 38px;gap:8px;align-items:center;}}
-      .rival-delete{{height:42px;border:0;border-radius:13px;background:#fee2e2;color:#991b1b;font-weight:1000;cursor:pointer;}}
-      .rival-form{{padding:14px;display:grid;gap:10px;border-top:1px solid #edf2fa;}}
-      .rival-form input,.rival-form textarea,.clip-form input,.clip-form textarea,.staff-notes textarea{{width:100%;box-sizing:border-box;border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;}}
-      .roster-card{{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}}
-      .roster-toggle{{margin:12px;border:1px solid #d7dfec;border-radius:16px;background:#f8fbff;overflow:hidden;}}
-      .roster-toggle summary{{cursor:pointer;padding:12px 14px;font-weight:1000;color:#07122d;list-style:none;display:flex;justify-content:space-between;align-items:center;}}
-      .roster-toggle summary::-webkit-details-marker{{display:none;}}
-      .roster-count{{font-size:12px;font-weight:900;padding:6px 9px;border-radius:999px;background:#e8fff4;color:#047857;}}
-      .add-player-panel{{display:none;gap:6px;align-items:center;flex-wrap:wrap;background:#f8fbff;border:1px solid #d7dfec;border-radius:14px;padding:8px;}}
-      .add-player-panel.open{{display:flex;}}
-      .add-player-panel .player-picker{{flex:1;min-width:220px;}}
-      .token,.player-token,.board-token,.piece{{width:52px!important;height:52px!important;min-width:52px!important;min-height:52px!important;border-radius:999px!important;display:flex!important;align-items:center!important;justify-content:center!important;font-weight:1000!important;font-size:18px!important;line-height:1!important;cursor:grab!important;touch-action:none!important;user-select:none!important;box-shadow:0 6px 14px rgba(0,0,0,.22)!important;}}
-      .token:active,.player-token:active,.board-token:active,.piece:active{{cursor:grabbing!important;transform:scale(1.04);}}
-      .token .token-number,.player-token .token-number,.board-token .token-number,.piece .token-number{{font-size:18px!important;font-weight:1000!important;pointer-events:none;}}
-      .roster-form{{display:grid;grid-template-columns:80px 1fr 140px auto;gap:8px;padding:12px;border-top:1px solid #edf2fa;background:#f8fbff;}}
-      .roster-form input,.player-picker{{border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;box-sizing:border-box;}}
-      .roster-table{{width:100%;border-collapse:collapse;}}
-      .roster-table th{{background:#f8fbff;color:#475569;text-align:left;font-size:12px;text-transform:uppercase;padding:9px;border-bottom:1px solid #e8eef8;}}
-      .roster-table td{{padding:9px;border-bottom:1px solid #eef2f8;font-size:14px;}}
-      .roster-delete{{border:0;background:#fee2e2;color:#991b1b;border-radius:9px;padding:7px 9px;font-weight:900;cursor:pointer;}}
-      .player-picker{{min-width:160px;background:#fff;font-weight:800;}}
-      .main-scout{{display:grid;gap:16px;}}
-      .phase-tabs{{display:flex;gap:8px;flex-wrap:wrap;padding:12px;background:#fff;border:1px solid #dfe7f5;border-radius:20px;box-shadow:0 8px 20px rgba(15,23,42,.06);}}
-      .phase-tab{{border:1px solid #b9c7dc;background:#f8fbff;color:#07122d;border-radius:999px;padding:10px 14px;font-weight:1000;cursor:pointer;opacity:1;}}
-      .phase-tab.active{{background:#07122d;color:#fff;border-color:#07122d;}}
-      .empty-rivals{{background:#fff;border:1px dashed #b9c7dc;border-radius:24px;padding:26px;text-align:center;color:#475569;box-shadow:0 12px 28px rgba(15,23,42,.06);}}
-      .token-delete{{position:absolute;right:-7px;top:-8px;width:20px;height:20px;border-radius:999px;border:2px solid #fff;background:#dc2626;color:#fff;font-weight:1000;font-size:16px;line-height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(0,0,0,.25);}}
-      .phase-title{{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;}}
-      .phase-title h2{{margin:0;font-size:28px;}}
-      .boards-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;}}
-      .board-card{{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}}
-      .board-card-head{{padding:13px 15px;border-bottom:1px solid #e8eef8;display:flex;justify-content:space-between;align-items:center;gap:8px;}}
-      .board-card-head h3{{margin:0;font-size:18px;}}
-      .board-tools{{display:flex;gap:6px;flex-wrap:wrap;}}
-      .mini-btn{{border:0;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:900;cursor:pointer;background:#eef3ff;color:#17315f;}}
-      .pitch{{position:relative;height:340px;margin:14px;border-radius:18px;overflow:hidden;background:linear-gradient(90deg,#0b7a3a,#0d8a43);border:3px solid rgba(255,255,255,.8);touch-action:none;user-select:none;}}
-      .pitch:before{{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(255,255,255,.06) 0 12%,rgba(0,0,0,.04) 12% 24%);}}
-      .pitch .mid{{position:absolute;left:50%;top:0;bottom:0;border-left:2px solid rgba(255,255,255,.72);}}
-      .pitch .circle{{position:absolute;left:50%;top:50%;width:92px;height:92px;margin:-46px 0 0 -46px;border:2px solid rgba(255,255,255,.72);border-radius:999px;}}
-      .pitch .box-l,.pitch .box-r{{position:absolute;top:25%;width:74px;height:50%;border:2px solid rgba(255,255,255,.72);}}
-      .pitch .box-l{{left:0;border-left:0;}} .pitch .box-r{{right:0;border-right:0;}}
-      .token{{position:absolute;width:42px;height:42px;border-radius:999px;color:#fff;border:3px solid rgba(255,255,255,.9);box-shadow:0 8px 18px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;font-weight:1000;cursor:grab;transform:translate(-50%,-50%);z-index:5;}}
-      .token:active{{cursor:grabbing;}}
-      .token input{{width:34px;text-align:center;background:transparent;border:0;color:white;font-weight:1000;font-size:14px;outline:none;}}
-      .staff-notes{{display:grid;grid-template-columns:1fr 1fr;gap:16px;}}
-      .note-card,.clips-card{{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);padding:16px;}}
-      .note-card h3,.clips-card h3{{margin:0 0 10px;}}
-      .staff-notes textarea{{min-height:110px;resize:vertical;}}
-      .clips-layout{{display:grid;grid-template-columns:360px 1fr;gap:16px;}}
-      .clip-form{{display:grid;gap:10px;}}
-      .clip-list{{display:grid;gap:12px;}}
-      .clip-item{{display:grid;grid-template-columns:230px 1fr;gap:12px;border:1px solid #e5eaf4;border-radius:18px;padding:12px;background:#f8fbff;}}
-      .clip-item video{{width:100%;border-radius:14px;background:#000;}}
-      .clip-item h4{{margin:0 0 6px;}}
-      .clip-item p{{margin:4px 0;color:#475569;white-space:pre-wrap;}}
-      .save-badge{{font-size:12px;font-weight:900;padding:7px 10px;border-radius:999px;background:#e8fff4;color:#047857;}}
-      @media(max-width:1100px){{.scout-grid,.boards-grid,.clips-layout,.staff-notes,.roster-form{{grid-template-columns:1fr;}}.pitch{{height:300px;}}.clip-item{{grid-template-columns:1fr;}}}}
+      .scout-wrap{padding:22px 0 38px;color:#0f172a;}
+      .scout-hero{border-radius:30px;padding:26px;background:radial-gradient(circle at top left,#38bdf8 0,#12204a 38%,#050816 100%);color:white;box-shadow:0 20px 46px rgba(2,8,23,.24);margin-bottom:18px;}
+      .scout-hero h1{margin:0;font-size:42px;line-height:1;}
+      .scout-hero p{margin:8px 0 0;opacity:.9;font-size:16px;}
+      .scout-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+      .scout-actions a,.scout-actions button,.scout-btn{border:0;border-radius:13px;padding:11px 14px;font-weight:900;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:8px;}
+      .scout-primary{background:#fff;color:#07122d;}
+      .scout-secondary{background:rgba(255,255,255,.13);color:#fff;border:1px solid rgba(255,255,255,.22)!important;}
+      .scout-grid{display:grid;grid-template-columns:280px 1fr;gap:18px;align-items:start;}
+      .scout-panel{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}
+      .scout-panel-head{padding:15px 17px;border-bottom:1px solid #e8eef8;display:flex;justify-content:space-between;gap:10px;align-items:center;}
+      .scout-panel-head h2{margin:0;font-size:18px;}
+      .rival-list{padding:12px;display:grid;gap:10px;}
+      .rival-item{width:100%;border:1px solid #e5eaf4;border-radius:16px;background:#f8fbff;padding:12px;text-align:left;cursor:pointer;font-weight:900;}
+      .rival-item.active{background:#07122d;color:#fff;border-color:#07122d;}
+      .rival-sub{display:block;font-size:12px;font-weight:800;opacity:.75;margin-top:4px;}
+      .rival-form,.compact-form{padding:14px;display:grid;gap:10px;border-top:1px solid #edf2fa;}
+      .rival-form input,.compact-form input,.compact-form textarea,.clip-form input,.clip-form textarea,.staff-notes textarea{width:100%;box-sizing:border-box;border:1px solid #d7dfec;border-radius:12px;padding:10px;font:inherit;}
+      .main-scout{display:grid;gap:16px;}
+      .breadcrumbs{font-size:13px;color:#64748b;font-weight:900;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+      .breadcrumbs button{border:0;background:#eef3ff;color:#17315f;border-radius:999px;padding:7px 10px;font-weight:900;cursor:pointer;}
+      .empty-rivals{background:#fff;border:1px dashed #b9c7dc;border-radius:24px;padding:26px;text-align:center;color:#475569;box-shadow:0 12px 28px rgba(15,23,42,.06);}
+      .section-title{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;}
+      .section-title h2{margin:0;font-size:28px;}
+      .cards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
+      .match-card{border:1px solid #dfe7f5;border-radius:22px;background:#fff;box-shadow:0 10px 22px rgba(15,23,42,.07);padding:16px;display:grid;gap:8px;}
+      .match-card h3{margin:0;font-size:20px;}
+      .muted{color:#64748b;}
+      .delete-btn{border:0;border-radius:12px;background:#fee2e2;color:#991b1b;font-weight:1000;cursor:pointer;padding:9px 11px;}
+      .small-btn{border:0;border-radius:12px;background:#eef3ff;color:#17315f;font-weight:1000;cursor:pointer;padding:9px 11px;}
+      .dark-btn{border:0;border-radius:12px;background:#07122d;color:#fff;font-weight:1000;cursor:pointer;padding:10px 12px;}
+      .roster-card{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}
+      .roster-toggle{margin:12px;border:1px solid #d7dfec;border-radius:16px;background:#f8fbff;overflow:hidden;}
+      .roster-toggle summary{cursor:pointer;padding:12px 14px;font-weight:1000;color:#07122d;list-style:none;display:flex;justify-content:space-between;align-items:center;}
+      .roster-toggle summary::-webkit-details-marker{display:none;}
+      .roster-count,.save-badge{font-size:12px;font-weight:900;padding:7px 10px;border-radius:999px;background:#e8fff4;color:#047857;}
+      .roster-table{width:100%;border-collapse:collapse;}
+      .roster-table th,.roster-table td{padding:9px;border-bottom:1px solid #edf2fa;text-align:left;font-size:13px;}
+      .roster-table input{width:100%;box-sizing:border-box;border:1px solid #d7dfec;border-radius:10px;padding:8px;}
+      .phase-tabs{display:flex;gap:8px;flex-wrap:wrap;padding:12px;background:#fff;border:1px solid #dfe7f5;border-radius:20px;box-shadow:0 8px 20px rgba(15,23,42,.06);}
+      .phase-tab{border:1px solid #b9c7dc;background:#f8fbff;color:#07122d;border-radius:999px;padding:10px 14px;font-weight:1000;cursor:pointer;opacity:1;}
+      .phase-tab.active{background:#07122d;color:#fff;border-color:#07122d;}
+      .boards-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+      .board-card{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);overflow:hidden;}
+      .board-card-head{padding:13px 15px;border-bottom:1px solid #e8eef8;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+      .board-card-head h3{margin:0;font-size:18px;}
+      .board-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+      .mini-btn{border:0;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:900;cursor:pointer;background:#eef3ff;color:#17315f;}
+      .add-player-panel{display:none;gap:6px;align-items:center;flex-wrap:wrap;background:#f8fbff;border:1px solid #d7dfec;border-radius:14px;padding:8px;}
+      .add-player-panel.open{display:flex;}
+      .add-player-panel .player-picker{flex:1;min-width:220px;}
+      .pitch{position:relative;height:340px;margin:14px;border-radius:18px;overflow:hidden;background:linear-gradient(90deg,#0b7a3a,#0d8a43);border:3px solid rgba(255,255,255,.8);touch-action:none;user-select:none;}
+      .pitch:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(255,255,255,.06) 0 12%,rgba(0,0,0,.04) 12% 24%);}
+      .pitch .mid{position:absolute;left:50%;top:0;bottom:0;border-left:2px solid rgba(255,255,255,.72);}
+      .pitch .circle{position:absolute;left:50%;top:50%;width:92px;height:92px;margin:-46px 0 0 -46px;border:2px solid rgba(255,255,255,.72);border-radius:999px;}
+      .pitch .box-l,.pitch .box-r{position:absolute;top:25%;width:74px;height:50%;border:2px solid rgba(255,255,255,.72);}
+      .pitch .box-l{left:0;border-left:0;} .pitch .box-r{right:0;border-right:0;}
+      .token{position:absolute;width:52px;height:52px;min-width:52px;min-height:52px;border-radius:999px;color:#fff;border:3px solid rgba(255,255,255,.9);box-shadow:0 8px 18px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;font-weight:1000;cursor:grab;transform:translate(-50%,-50%);z-index:5;font-size:18px;line-height:1;touch-action:none;}
+      .token:active{cursor:grabbing;transform:translate(-50%,-50%) scale(1.04);}
+      .token-delete{position:absolute;right:-7px;top:-8px;width:20px;height:20px;border-radius:999px;border:2px solid #fff;background:#dc2626;color:#fff;font-weight:1000;font-size:13px;line-height:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(0,0,0,.25);}
+      .staff-notes{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+      .note-card,.clips-card{background:#fff;border:1px solid #dfe7f5;border-radius:24px;box-shadow:0 12px 28px rgba(15,23,42,.08);padding:16px;}
+      .note-card h3,.clips-card h3{margin:0 0 10px;}
+      .staff-notes textarea{min-height:110px;resize:vertical;}
+      .clips-layout{display:grid;grid-template-columns:360px 1fr;gap:16px;}
+      .clip-form{display:grid;gap:10px;}
+      .clip-list{display:grid;gap:12px;}
+      .clip-item{display:grid;grid-template-columns:230px 1fr;gap:12px;border:1px solid #e5eaf4;border-radius:18px;padding:12px;background:#f8fbff;}
+      .clip-item video{width:100%;border-radius:14px;background:#000;}
+      .clip-item h4{margin:0 0 6px;}
+      .clip-item p{margin:4px 0;color:#475569;white-space:pre-wrap;}
+      @media(max-width:1100px){.scout-grid,.boards-grid,.clips-layout,.staff-notes,.cards-grid{grid-template-columns:1fr;}.pitch{height:300px;}.clip-item{grid-template-columns:1fr;}}
     </style>
 
     <div class="scout-wrap">
@@ -4303,7 +4369,7 @@ def render_rivals_page(request: Request) -> str:
         <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;">
           <div>
             <h1>Rivales · Scouting</h1>
-            <p>Pizarras por fase, ataque/defensa, clips de vídeo y comentarios del staff.</p>
+            <p>Rivales → Partidos analizados → fases del partido con pizarras, clips y comentarios staff.</p>
           </div>
           <div class="scout-actions">
             <a class="scout-secondary" href="/select-module">Módulos</a>
@@ -4320,337 +4386,163 @@ def render_rivals_page(request: Request) -> str:
           <div class="rival-list" id="rivalList"></div>
           <div class="rival-form">
             <input id="newRivalName" placeholder="Nombre del rival">
-            <button class="scout-btn scout-primary" style="background:#07122d;color:#fff;justify-content:center;" onclick="addRival()">+ Añadir rival</button>
+            <button class="dark-btn" onclick="addRival()">+ Añadir rival</button>
           </div>
         </aside>
 
         <main class="main-scout">
-          <div class="phase-title">
-            <h2 id="currentTitle">Rival</h2>
-            <div class="save-badge">Cada fase guarda Ataque + Defensa</div>
-          </div>
-          <div class="phase-tabs" id="phaseTabs"></div>
-          <div class="empty-rivals" id="emptyRivalsBox" style="display:none;">
-            <h2 style="margin:0 0 8px;color:#07122d;">Añade el primer rival</h2>
-            <p style="margin:0;">No hay equipos de ejemplo. Crea un rival en el panel izquierdo para empezar a trabajar sus fases.</p>
-          </div>
-
-          <section class="roster-card" id="rosterSection" style="display:none;">
-            <div class="scout-panel-head"><h2>Plantilla rival</h2><span class="save-badge">Dorsal · Jugadora · Posición</span></div>
-            <details class="roster-toggle">
-              <summary>Ver / editar jugadoras creadas <span class="roster-count" id="rosterCount">0 jugadoras</span></summary>
-              <div style="overflow:auto;">
-                <table class="roster-table">
-                  <thead><tr><th>Dorsal</th><th>Jugadora</th><th>Posición</th><th></th></tr></thead>
-                  <tbody id="rosterBody"></tbody>
-                </table>
-              </div>
-            </details>
-            <div class="roster-form">
-              <input id="rosterNumber" placeholder="Dorsal">
-              <input id="rosterName" placeholder="Nombre jugadora">
-              <input id="rosterPosition" placeholder="Posición">
-              <button class="scout-btn scout-primary" style="background:#07122d;color:#fff;justify-content:center;" onclick="addRosterPlayer()">+ Añadir</button>
-            </div>
-          </section>
-
-          <section class="boards-grid" id="boardsGrid">
-            <div class="board-card">
-              <div class="board-card-head">
-                <h3>⚡ Ataque</h3>
-                <div class="board-tools">
-                  <button class="mini-btn" onclick="togglePicker('ataque')">+ Añadir jugadora</button>
-                  <div id="add-panel-ataque" class="add-player-panel">
-                    <select id="picker-ataque" class="player-picker"></select>
-                    <button class="mini-btn" onclick="addToken('ataque')">Añadir</button>
-                    <button class="mini-btn" onclick="togglePicker('ataque', false)">Cancelar</button>
-                  </div>
-                  <button class="mini-btn" onclick="resetBoard('ataque')">Reset</button>
-                </div>
-              </div>
-              <div class="pitch" id="pitch-ataque"><div class="mid"></div><div class="circle"></div><div class="box-l"></div><div class="box-r"></div></div>
-            </div>
-            <div class="board-card">
-              <div class="board-card-head">
-                <h3>🛡️ Defensa</h3>
-                <div class="board-tools">
-                  <button class="mini-btn" onclick="togglePicker('defensa')">+ Añadir jugadora</button>
-                  <div id="add-panel-defensa" class="add-player-panel">
-                    <select id="picker-defensa" class="player-picker"></select>
-                    <button class="mini-btn" onclick="addToken('defensa')">Añadir</button>
-                    <button class="mini-btn" onclick="togglePicker('defensa', false)">Cancelar</button>
-                  </div>
-                  <button class="mini-btn" onclick="resetBoard('defensa')">Reset</button>
-                </div>
-              </div>
-              <div class="pitch" id="pitch-defensa"><div class="mid"></div><div class="circle"></div><div class="box-l"></div><div class="box-r"></div></div>
-            </div>
-          </section>
-
-          <section class="staff-notes" id="staffNotesSection">
-            <div class="note-card">
-              <h3>Comentarios staff · Ataque</h3>
-              <textarea id="attackComments" placeholder="Ej: buscar espalda de la dorsal 4, finalizar rápido, evitar pérdidas interiores..."></textarea>
-            </div>
-            <div class="note-card">
-              <h3>Comentarios staff · Defensa</h3>
-              <textarea id="defenseComments" placeholder="Ej: cerrar banda fuerte, saltar a presión tras pase atrás, vigilar segundo palo..."></textarea>
-            </div>
-          </section>
-
-          <section class="clips-card" id="clipsSection">
-            <h3>🎬 Clips de vídeo de esta fase</h3>
-            <div class="clips-layout">
-              <form class="clip-form" action="/rivals/upload-clip" method="post" enctype="multipart/form-data">
-                <input type="hidden" name="rival_id" id="clipRivalId">
-                <input type="hidden" name="phase" id="clipPhase">
-                <input name="title" placeholder="Título del clip" required>
-                <input name="minute" placeholder="Minuto / acción, ej: 12:40">
-                <textarea name="comment" placeholder="Comentario técnico del staff"></textarea>
-                <input name="video" type="file" accept="video/*" required>
-                <button class="scout-btn scout-primary" style="background:#07122d;color:#fff;justify-content:center;" type="submit">Subir clip</button>
-              </form>
-              <div class="clip-list" id="clipList"></div>
-            </div>
-          </section>
+          <div class="breadcrumbs" id="breadcrumbs"></div>
+          <div id="mainContent"></div>
         </main>
       </div>
     </div>
 
-    <script id="rivalsData" type="application/json">{data_json}</script>
-    <script id="rivalPhases" type="application/json">{phases_json}</script>
+    <script id="rivalsData" type="application/json">__DATA__</script>
+    <script id="rivalPhases" type="application/json">__PHASES__</script>
     <script>
-      let data = JSON.parse(document.getElementById('rivalsData').textContent || '{{"rivals":[]}}');
+      let data = JSON.parse(document.getElementById('rivalsData').textContent || '{"rivals":[]}');
       const phases = JSON.parse(document.getElementById('rivalPhases').textContent || '[]');
-      let currentRivalId = (data.rivals[0] || {{}}).id || null;
+      const modes = ['ataque','defensa'];
+      let currentRivalId = (data.rivals && data.rivals[0]) ? data.rivals[0].id : null;
+      let currentMatchId = null;
       let currentPhase = phases[0] || '2vs2';
       let drag = null;
       let saveTimer = null;
 
-      function uid(){{ return 'id-' + Math.random().toString(16).slice(2) + '-' + Date.now(); }}
-      function currentRival(){{ return (data.rivals||[]).find(r => r.id === currentRivalId) || null; }}
-      function phaseData(){{ const r=currentRival(); return r ? r.phases[currentPhase] : null; }}
-      function setStatus(txt){{ document.getElementById('saveStatus').textContent = txt; }}
-      function scheduleSave(){{ setStatus('Guardando...'); clearTimeout(saveTimer); saveTimer=setTimeout(saveAllNow, 450); }}
-      async function saveAllNow(){{
-        ensureShape();
-        setStatus('Guardando...');
-        try{{
-          const res = await fetch('/rivals/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data), keepalive:true}});
-          const out = await res.json().catch(()=>({{ok:false}}));
-          if(!res.ok || out.ok === false) throw new Error(out.error || 'save failed');
-          setStatus('Guardado');
-          setTimeout(()=>setStatus('Listo'), 900);
-          return true;
-        }}catch(e){{ setStatus('Error'); console.error(e); return false; }}
-      }}
-      window.addEventListener('beforeunload', () => {{
-        try {{
-          ensureShape();
-          fetch('/rivals/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify(data), keepalive:true}});
-        }} catch(e) {{}}
-      }});
+      function uid(){ return (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())+Math.random().toString(16).slice(2); }
+      function esc(s){ return String(s||'').replace(/[&<>'"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+      function attr(s){ return esc(s).replace(/`/g,'&#96;'); }
+      function currentRival(){ return (data.rivals||[]).find(r=>r.id===currentRivalId) || null; }
+      function currentMatch(){ const r=currentRival(); return r ? (r.matches||[]).find(m=>m.id===currentMatchId) || null : null; }
+      function emptyPhase(){ return {attack_comments:'',defense_comments:'',clips:[],boards:{ataque:{tokens:[]},defensa:{tokens:[]}}}; }
+      function ensureMatch(match){
+        match.phases = match.phases || {};
+        phases.forEach(ph=>{
+          match.phases[ph] = match.phases[ph] || emptyPhase();
+          match.phases[ph].boards = match.phases[ph].boards || {};
+          modes.forEach(mode=>{ match.phases[ph].boards[mode] = match.phases[ph].boards[mode] || {tokens:[]}; match.phases[ph].boards[mode].tokens = match.phases[ph].boards[mode].tokens || []; });
+          match.phases[ph].clips = match.phases[ph].clips || [];
+        });
+      }
+      function phaseData(){ const m=currentMatch(); if(!m) return null; ensureMatch(m); return m.phases[currentPhase]; }
 
-      function ensureShape(){{
-        data.rivals = data.rivals || [];
-        data.rivals.forEach(r => {{
-          r.roster = Array.isArray(r.roster) ? r.roster : [];
-          r.roster.forEach(p => {{ p.id = p.id || uid(); p.number = p.number || ''; p.name = p.name || ''; p.position = p.position || ''; }});
-          r.phases = r.phases || {{}};
-          phases.forEach(ph => {{
-            r.phases[ph] = r.phases[ph] || {{attack_comments:'', defense_comments:'', clips:[], boards:{{}}}};
-            r.phases[ph].clips = r.phases[ph].clips || [];
-            r.phases[ph].boards = r.phases[ph].boards || {{}};
-            ['ataque','defensa'].forEach(mode => {{
-              r.phases[ph].boards[mode] = r.phases[ph].boards[mode] || {{tokens:[]}};
-              r.phases[ph].boards[mode].tokens = r.phases[ph].boards[mode].tokens || [];
-            }});
-          }});
-        }});
-      }}
+      function renderAll(){ renderRivalList(); renderBreadcrumbs(); renderMain(); }
+      function renderRivalList(){
+        const box=document.getElementById('rivalList');
+        if(!data.rivals || !data.rivals.length){ box.innerHTML='<div class="muted" style="padding:12px;">Sin rivales creados.</div>'; return; }
+        box.innerHTML=data.rivals.map(r=>`<button class="rival-item ${r.id===currentRivalId?'active':''}" onclick="selectRival('${r.id}')">${esc(r.name)}<span class="rival-sub">${(r.matches||[]).length} partidos · ${(r.roster||[]).length} jugadoras</span></button>`).join('');
+      }
+      function renderBreadcrumbs(){
+        const r=currentRival(); const m=currentMatch();
+        let html='<button onclick="goRivals()">Rivales</button>';
+        if(r) html += `<span>›</span><button onclick="goRivalHome()">${esc(r.name)}</button>`;
+        if(m) html += `<span>›</span><b>${esc(m.title||'Partido')}</b>`;
+        document.getElementById('breadcrumbs').innerHTML=html;
+      }
+      function renderMain(){
+        const r=currentRival(); const m=currentMatch();
+        const box=document.getElementById('mainContent');
+        if(!r){ box.innerHTML=`<div class="empty-rivals"><h2>Añade el primer rival</h2><p>Crea el equipo rival manualmente en el panel izquierdo.</p></div>`; return; }
+        if(!m) renderRivalHome(r, box); else renderMatchAnalysis(r, m, box);
+      }
+      function goRivals(){ currentMatchId=null; renderAll(); }
+      function goRivalHome(){ currentMatchId=null; renderAll(); }
+      function selectRival(id){ currentRivalId=id; currentMatchId=null; renderAll(); }
 
-      function renderAll(){{ ensureShape(); renderRivals(); renderPhases(); const has=!!currentRival(); document.getElementById('emptyRivalsBox').style.display=has?'none':'block'; document.getElementById('rosterSection').style.display=has?'block':'none'; document.getElementById('boardsGrid').style.display=has?'grid':'none'; document.getElementById('staffNotesSection').style.display=has?'grid':'none'; document.getElementById('clipsSection').style.display=has?'block':'none'; if(has){{renderRoster(); renderBoards(); renderNotes(); renderClips();}} }}
-      function renderRivals(){{
-        if(!currentRivalId && data.rivals.length) currentRivalId=data.rivals[0].id;
-        const box=document.getElementById('rivalList'); box.innerHTML='';
-        if(!data.rivals.length){{ box.innerHTML='<div class="muted" style="padding:10px;">Sin rivales creados.</div>'; }}
-        data.rivals.forEach(r => {{
-          const row=document.createElement('div'); row.className='rival-row';
-          const b=document.createElement('button'); b.className='rival-item' + (r.id===currentRivalId?' active':'');
-          b.innerHTML = `<div style="display:flex;align-items:center;gap:8px;"><span>${{escapeHtml(r.name||'Rival')}}</span></div>`;
-          b.onclick=()=>{{currentRivalId=r.id; renderAll();}};
-          const del=document.createElement('button'); del.type='button'; del.className='rival-delete'; del.textContent='×'; del.title='Eliminar rival';
-          del.onclick=(ev)=>{{ ev.stopPropagation(); deleteRival(r.id); }};
-          row.appendChild(b); row.appendChild(del); box.appendChild(row);
-        }});
-        const r=currentRival();
-        document.getElementById('currentTitle').textContent = r ? `${{r.name}} · ${{currentPhase}}` : 'Rivales · Scouting';
-        document.getElementById('clipRivalId').value = currentRivalId || '';
-        document.getElementById('clipPhase').value = currentPhase;
-      }}
-      function renderPhases(){{
-        const box=document.getElementById('phaseTabs'); box.innerHTML='';
-        phases.forEach(ph=>{{
-          const b=document.createElement('button'); b.className='phase-tab' + (ph===currentPhase?' active':''); b.textContent=ph;
-          b.onclick=()=>{{ currentPhase=ph; renderAll(); }};
-          box.appendChild(b);
-        }});
-      }}
-      function renderRoster(){{
+      function addRival(){
+        const name=(document.getElementById('newRivalName').value||'').trim();
+        if(!name) return alert('Pon el nombre del rival');
+        const rival={id:uid(),name,general_notes:'',roster:[],matches:[]};
+        data.rivals=data.rivals||[]; data.rivals.push(rival); currentRivalId=rival.id; currentMatchId=null;
+        document.getElementById('newRivalName').value=''; saveAllNow(); renderAll();
+      }
+      function deleteRival(id){
+        const r=(data.rivals||[]).find(x=>x.id===id); if(!r) return;
+        if(!confirm('¿Eliminar el rival '+r.name+' y todos sus partidos analizados?')) return;
+        data.rivals=(data.rivals||[]).filter(x=>x.id!==id); currentRivalId=data.rivals[0]?.id || null; currentMatchId=null; saveAllNow(); renderAll();
+      }
+
+      function renderRivalHome(r, box){
+        box.innerHTML=`
+          <div class="section-title"><h2>${esc(r.name)}</h2><button class="delete-btn" onclick="deleteRival('${r.id}')">Eliminar rival</button></div>
+          <div class="roster-card">
+            <div class="scout-panel-head"><h2>Plantilla rival</h2><span class="roster-count" id="rosterCount">${(r.roster||[]).length} jugadoras</span></div>
+            <details class="roster-toggle"><summary>Ver / editar jugadoras creadas <span class="roster-count">Abrir</span></summary><div style="overflow:auto;"><table class="roster-table"><thead><tr><th>Dorsal</th><th>Jugadora</th><th>Posición</th><th></th></tr></thead><tbody id="rosterBody"></tbody></table></div></details>
+            <div class="compact-form" style="grid-template-columns:90px 1fr 150px auto;align-items:center;">
+              <input id="rosterNumber" placeholder="Dorsal"><input id="rosterName" placeholder="Nombre jugadora"><input id="rosterPosition" placeholder="Posición"><button class="dark-btn" onclick="addRosterPlayer()">+ Añadir</button>
+            </div>
+          </div>
+          <div class="scout-panel">
+            <div class="scout-panel-head"><h2>Partidos analizados</h2><span class="save-badge">${(r.matches||[]).length} partidos</span></div>
+            <div class="cards-grid" id="matchCards" style="padding:14px;"></div>
+            <div class="compact-form" style="grid-template-columns:1fr 150px 160px 120px auto;align-items:center;">
+              <input id="matchTitle" placeholder="Ej: vs Sakura FC"><input id="matchDate" placeholder="Fecha"><input id="matchCompetition" placeholder="Competición/Jornada"><input id="matchResult" placeholder="Resultado"><button class="dark-btn" onclick="addMatch()">+ Nuevo partido</button>
+            </div>
+          </div>
+          <div class="scout-panel"><div class="scout-panel-head"><h2>Notas generales rival</h2></div><div style="padding:14px;"><textarea style="width:100%;min-height:90px;box-sizing:border-box;border:1px solid #d7dfec;border-radius:12px;padding:10px;" oninput="currentRival().general_notes=this.value;scheduleSave();" placeholder="Notas generales...">${esc(r.general_notes||'')}</textarea></div></div>
+        `;
+        renderRoster(); renderMatches();
+      }
+      function renderRoster(){
+        const r=currentRival(); const body=document.getElementById('rosterBody'); if(!r||!body) return;
+        body.innerHTML=(r.roster||[]).map(p=>`<tr><td><input value="${attr(p.number)}" oninput="updateRoster('${p.id}','number',this.value)"></td><td><input value="${attr(p.name)}" oninput="updateRoster('${p.id}','name',this.value)"></td><td><input value="${attr(p.position)}" oninput="updateRoster('${p.id}','position',this.value)"></td><td><button class="delete-btn" onclick="deleteRosterPlayer('${p.id}')">×</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">Sin jugadoras creadas.</td></tr>';
+      }
+      function addRosterPlayer(){
         const r=currentRival(); if(!r) return;
-        r.roster = Array.isArray(r.roster) ? r.roster : [];
-        const count=document.getElementById('rosterCount');
-        if(count) count.textContent = r.roster.length + (r.roster.length === 1 ? ' jugadora' : ' jugadoras');
-        const body=document.getElementById('rosterBody'); body.innerHTML='';
-        if(!r.roster.length){{
-          body.innerHTML='<tr><td colspan="4" style="color:#64748b;text-align:center;padding:14px;">Aún no has añadido jugadoras a este rival.</td></tr>';
-        }} else {{
-          r.roster.forEach(p=>{{
-            const tr=document.createElement('tr');
-            tr.innerHTML=`<td><strong>${{escapeHtml(p.number||'')}}</strong></td><td>${{escapeHtml(p.name||'')}}</td><td>${{escapeHtml(p.position||'')}}</td><td style="text-align:right;"><button class="roster-delete" onclick="removeRosterPlayer('${{p.id}}')">×</button></td>`;
-            body.appendChild(tr);
-          }});
-        }}
-        updatePickers();
-      }}
-      function updatePickers(){{
-        const r=currentRival(); const roster=(r && Array.isArray(r.roster)) ? r.roster : [];
-        ['ataque','defensa'].forEach(mode=>{{
-          const sel=document.getElementById('picker-'+mode); if(!sel) return;
-          sel.innerHTML='<option value="">Ficha libre</option>' + roster.map(p=>`<option value="${{escapeAttr(p.id)}}">${{escapeHtml((p.number? p.number+' - ' : '') + (p.name||'Sin nombre') + (p.position? ' · '+p.position : ''))}}</option>`).join('');
-        }});
-      }}
-      function addRosterPlayer(){{
+        const number=document.getElementById('rosterNumber').value.trim(); const name=document.getElementById('rosterName').value.trim(); const position=document.getElementById('rosterPosition').value.trim();
+        if(!number && !name) return alert('Pon dorsal o nombre');
+        r.roster=r.roster||[]; r.roster.push({id:uid(),number,name,position});
+        ['rosterNumber','rosterName','rosterPosition'].forEach(id=>document.getElementById(id).value=''); renderMain(); saveAllNow();
+      }
+      function updateRoster(id, field, value){ const r=currentRival(); const p=r?.roster?.find(x=>x.id===id); if(p){p[field]=value; scheduleSave();} }
+      function deleteRosterPlayer(id){ const r=currentRival(); if(!r) return; r.roster=(r.roster||[]).filter(p=>p.id!==id); renderMain(); saveAllNow(); }
+
+      function renderMatches(){
+        const r=currentRival(); const box=document.getElementById('matchCards'); if(!r||!box) return;
+        box.innerHTML=(r.matches||[]).map(m=>`<div class="match-card"><h3>${esc(m.title||'Partido')}</h3><div class="muted">${esc(m.date||'Sin fecha')} · ${esc(m.competition||'')} ${m.result?'· '+esc(m.result):''}</div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="dark-btn" onclick="openMatch('${m.id}')">Analizar</button><button class="delete-btn" onclick="deleteMatch('${m.id}')">Eliminar</button></div></div>`).join('') || '<div class="muted">Aún no hay partidos analizados.</div>';
+      }
+      function addMatch(){
         const r=currentRival(); if(!r) return;
-        const number=document.getElementById('rosterNumber').value.trim();
-        const name=document.getElementById('rosterName').value.trim();
-        const position=document.getElementById('rosterPosition').value.trim();
-        if(!number && !name) return;
-        r.roster = Array.isArray(r.roster) ? r.roster : [];
-        r.roster.push({{id:uid(), number, name, position}});
-        document.getElementById('rosterNumber').value=''; document.getElementById('rosterName').value=''; document.getElementById('rosterPosition').value='';
-        renderRoster(); saveAllNow();
-      }}
-      function removeRosterPlayer(id){{
-        const r=currentRival(); if(!r) return;
-        r.roster=(r.roster||[]).filter(p=>p.id!==id);
-        renderRoster(); saveAllNow();
-      }}
-      function renderBoards(){{ ['ataque','defensa'].forEach(renderBoard); }}
-      function renderBoard(mode){{
-        const pData = phaseData(); if(!pData) return;
-        const pitch=document.getElementById('pitch-'+mode);
-        [...pitch.querySelectorAll('.token')].forEach(el=>el.remove());
-        const board = pData.boards[mode];
-        board.tokens.forEach(t => {{
-          const el=document.createElement('div'); el.className='token'; el.dataset.mode=mode; el.dataset.id=t.id;
-          el.style.left=(t.x||50)+'%'; el.style.top=(t.y||50)+'%'; el.style.background=t.color || (mode==='ataque'?'#0ea5e9':'#ef4444');
-          el.title=[t.number, t.name, t.position].filter(Boolean).join(' · ');
-          const input=document.createElement('input'); input.value=t.number || ''; input.maxLength=3;
-          input.oninput=()=>{{ t.number=input.value; scheduleSave(); }};
-          input.onclick=(ev)=>ev.stopPropagation(); input.onpointerdown=(ev)=>ev.stopPropagation();
-          el.appendChild(input);
-          const del=document.createElement('button'); del.type='button'; del.className='token-delete'; del.textContent='×'; del.title='Eliminar ficha';
-          del.onclick=(ev)=>{{ ev.stopPropagation(); removeToken(mode, t.id); }};
-          del.onpointerdown=(ev)=>ev.stopPropagation();
-          el.appendChild(del);
-          el.addEventListener('pointerdown', startDrag);
-          pitch.appendChild(el);
-        }});
-      }}
-      function renderNotes(){{
-        const p=phaseData(); if(!p) return;
-        const a=document.getElementById('attackComments'), d=document.getElementById('defenseComments');
-        a.value=p.attack_comments || ''; d.value=p.defense_comments || '';
-        a.oninput=()=>{{ p.attack_comments=a.value; scheduleSave(); }};
-        d.oninput=()=>{{ p.defense_comments=d.value; scheduleSave(); }};
-      }}
-      function renderClips(){{
-        const pData=phaseData(); if(!pData) return;
-        const box=document.getElementById('clipList'); box.innerHTML='';
-        const clips=pData.clips || [];
-        if(!clips.length){{ box.innerHTML='<div class="muted">Aún no hay clips para esta fase.</div>'; return; }}
-        clips.forEach(c=>{{
-          const div=document.createElement('div'); div.className='clip-item';
-          div.innerHTML = `<video controls src="${{escapeAttr(c.url)}}"></video><div><h4>${{escapeHtml(c.title||'Clip')}}</h4><p><strong>Minuto:</strong> ${{escapeHtml(c.minute||'-')}}</p><p>${{escapeHtml(c.comment||'')}}</p></div>`;
-          box.appendChild(div);
-        }});
-      }}
-      function addRival(){{
-        const name=document.getElementById('newRivalName').value.trim(); if(!name) return;
-        const color='#ef4444';
-        const phasesObj={{}};
-        phases.forEach(ph=> phasesObj[ph]={{attack_comments:'',defense_comments:'',clips:[],boards:{{ataque:{{tokens:[]}},defensa:{{tokens:[]}}}}}});
-        data.rivals.push({{id:uid(), name, color, general_notes:'', roster:[], phases:phasesObj}});
-        currentRivalId=data.rivals[data.rivals.length-1].id;
-        document.getElementById('newRivalName').value='';
-        renderAll(); saveAllNow();
-      }}
-      function deleteRival(id){{
-        const r=(data.rivals||[]).find(x=>x.id===id);
-        if(!r) return;
-        if(!confirm('¿Eliminar el equipo rival "' + (r.name||'Rival') + '" y todos sus clips/pizarras?')) return;
-        data.rivals=(data.rivals||[]).filter(x=>x.id!==id);
-        currentRivalId=(data.rivals[0]||{{}}).id || null;
-        renderAll(); saveAllNow();
-      }}
-      function togglePicker(mode, force){{
-        const panel=document.getElementById('add-panel-'+mode);
-        if(!panel) return;
-        const shouldOpen = (typeof force === 'boolean') ? force : !panel.classList.contains('open');
-        panel.classList.toggle('open', shouldOpen);
-      }}
-      function addToken(mode){{
-        const p=phaseData(); if(!p) return;
-        const tokens=p.boards[mode].tokens;
-        const r=currentRival();
-        const sel=document.getElementById('picker-'+mode);
-        let rosterPlayer=null;
-        if(r && sel && sel.value) rosterPlayer=(r.roster||[]).find(pl=>pl.id===sel.value) || null;
-        tokens.push({{
-          id:uid(),
-          player_id: rosterPlayer ? rosterPlayer.id : '',
-          number: rosterPlayer ? String(rosterPlayer.number || '') : String(tokens.length+1),
-          name: rosterPlayer ? String(rosterPlayer.name || '') : '',
-          position: rosterPlayer ? String(rosterPlayer.position || '') : '',
-          x:50, y:50, color: mode==='ataque'?'#0ea5e9':'#ef4444'
-        }});
-        renderBoard(mode);
-        if(sel) sel.value = '';
-        togglePicker(mode, false);
-        scheduleSave();
-      }}
-      function removeToken(mode, tokenId){{
-        const p=phaseData(); if(!p) return;
-        p.boards[mode].tokens = (p.boards[mode].tokens||[]).filter(t=>t.id!==tokenId);
-        renderBoard(mode); scheduleSave();
-      }}
-      function resetBoard(mode){{
-        if(!confirm('¿Resetear la pizarra de '+mode+' en '+currentPhase+'?')) return;
-        const p=phaseData(); if(!p) return; p.boards[mode].tokens=[]; renderBoard(mode); scheduleSave();
-      }}
-      function startDrag(ev){{
-        const el=ev.currentTarget;
-        drag={{el, mode:el.dataset.mode, id:el.dataset.id}};
-        el.setPointerCapture(ev.pointerId);
-        window.addEventListener('pointermove', onDrag);
-        window.addEventListener('pointerup', endDrag, {{once:true}});
-      }}
-      function onDrag(ev){{
-        if(!drag) return;
-        const pitch=document.getElementById('pitch-'+drag.mode);
-        const rect=pitch.getBoundingClientRect();
-        let x=((ev.clientX-rect.left)/rect.width)*100; let y=((ev.clientY-rect.top)/rect.height)*100;
-        x=Math.max(3,Math.min(97,x)); y=Math.max(5,Math.min(95,y));
-        drag.el.style.left=x+'%'; drag.el.style.top=y+'%';
-        const p=phaseData(); const t=p ? p.boards[drag.mode].tokens.find(t=>t.id===drag.id) : null; if(t){{t.x=Number(x.toFixed(2));t.y=Number(y.toFixed(2));}}
-      }}
-      function endDrag(){{ window.removeEventListener('pointermove', onDrag); drag=null; scheduleSave(); }}
-      function escapeHtml(s){{ return String(s||'').replace(/[&<>'"]/g, c=>({{'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}}[c])); }}
-      function escapeAttr(s){{ return escapeHtml(s).replace(/`/g,'&#96;'); }}
+        const title=(document.getElementById('matchTitle').value||'').trim() || 'Partido analizado';
+        const match={id:uid(),title,date:document.getElementById('matchDate').value.trim(),competition:document.getElementById('matchCompetition').value.trim(),result:document.getElementById('matchResult').value.trim(),notes:'',phases:{}};
+        ensureMatch(match); r.matches=r.matches||[]; r.matches.push(match); currentMatchId=match.id; saveAllNow(); renderAll();
+      }
+      function openMatch(id){ currentMatchId=id; currentPhase=phases[0]; renderAll(); }
+      function deleteMatch(id){ const r=currentRival(); if(!r) return; const m=(r.matches||[]).find(x=>x.id===id); if(!m) return; if(!confirm('¿Eliminar el partido '+(m.title||'')+'?')) return; r.matches=(r.matches||[]).filter(x=>x.id!==id); currentMatchId=null; saveAllNow(); renderAll(); }
+
+      function renderMatchAnalysis(r,m,box){ ensureMatch(m); const p=phaseData();
+        box.innerHTML=`
+          <div class="section-title"><h2>${esc(r.name)} · ${esc(m.title)}</h2><button class="small-btn" onclick="goRivalHome()">← Volver a partidos</button></div>
+          <div class="phase-tabs">${phases.map(ph=>`<button class="phase-tab ${ph===currentPhase?'active':''}" onclick="currentPhase='${ph}';renderAll();">${ph}</button>`).join('')}</div>
+          <section class="boards-grid">
+            ${boardHtml('ataque','⚡ Ataque')}
+            ${boardHtml('defensa','🛡️ Defensa')}
+          </section>
+          <section class="staff-notes">
+            <div class="note-card"><h3>Comentarios ataque · ${esc(currentPhase)}</h3><textarea oninput="phaseData().attack_comments=this.value;scheduleSave();">${esc(p.attack_comments||'')}</textarea></div>
+            <div class="note-card"><h3>Comentarios defensa · ${esc(currentPhase)}</h3><textarea oninput="phaseData().defense_comments=this.value;scheduleSave();">${esc(p.defense_comments||'')}</textarea></div>
+          </section>
+          <section class="clips-card"><h3>Clips de vídeo · ${esc(currentPhase)}</h3><div class="clips-layout"><form class="clip-form" method="post" action="/rivals/upload-clip" enctype="multipart/form-data"><input type="hidden" name="rival_id" value="${attr(r.id)}"><input type="hidden" name="match_id" value="${attr(m.id)}"><input type="hidden" name="phase" value="${attr(currentPhase)}"><input name="title" placeholder="Título clip"><input name="minute" placeholder="Minuto / fase"><textarea name="comment" placeholder="Comentario staff"></textarea><input type="file" name="video" accept="video/*" required><button class="dark-btn" type="submit">Subir clip</button></form><div class="clip-list" id="clipList"></div></div></section>
+        `;
+        renderPickers(); renderBoard('ataque'); renderBoard('defensa'); renderClips();
+      }
+      function boardHtml(mode,title){ return `<div class="board-card"><div class="board-card-head"><h3>${title}</h3><div class="board-tools"><button class="mini-btn" onclick="togglePicker('${mode}')">+ Añadir jugadora</button><div id="add-panel-${mode}" class="add-player-panel"><select id="picker-${mode}" class="player-picker"></select><button class="mini-btn" onclick="addToken('${mode}')">Añadir</button><button class="mini-btn" onclick="togglePicker('${mode}',false)">Cancelar</button></div><button class="mini-btn" onclick="resetBoard('${mode}')">Reset</button></div></div><div class="pitch" id="pitch-${mode}"><div class="mid"></div><div class="circle"></div><div class="box-l"></div><div class="box-r"></div></div></div>`; }
+      function renderPickers(){ modes.forEach(mode=>{ const sel=document.getElementById('picker-'+mode); const r=currentRival(); if(!sel||!r) return; sel.innerHTML='<option value="">Ficha libre</option>'+(r.roster||[]).map(p=>`<option value="${attr(p.id)}">${esc(p.number||'?')} - ${esc(p.name||'Sin nombre')} ${p.position?'· '+esc(p.position):''}</option>`).join(''); }); }
+      function togglePicker(mode,force){ const panel=document.getElementById('add-panel-'+mode); if(!panel) return; const open=(typeof force==='boolean')?force:!panel.classList.contains('open'); panel.classList.toggle('open',open); }
+      function addToken(mode){ const p=phaseData(); const r=currentRival(); if(!p||!r) return; const sel=document.getElementById('picker-'+mode); const rp=sel&&sel.value ? (r.roster||[]).find(x=>x.id===sel.value) : null; p.boards[mode].tokens.push({id:uid(),player_id:rp?rp.id:'',number:rp?String(rp.number||'?'):String((p.boards[mode].tokens||[]).length+1),name:rp?String(rp.name||''):'',position:rp?String(rp.position||''):'',x:50,y:50,color:mode==='ataque'?'#0ea5e9':'#ef4444'}); renderBoard(mode); if(sel) sel.value=''; togglePicker(mode,false); scheduleSave(); }
+      function removeToken(mode,id){ const p=phaseData(); if(!p) return; p.boards[mode].tokens=(p.boards[mode].tokens||[]).filter(t=>t.id!==id); renderBoard(mode); scheduleSave(); }
+      function resetBoard(mode){ if(!confirm('¿Resetear pizarra '+mode+'?')) return; const p=phaseData(); if(!p) return; p.boards[mode].tokens=[]; renderBoard(mode); scheduleSave(); }
+      function renderBoard(mode){ const p=phaseData(); const pitch=document.getElementById('pitch-'+mode); if(!p||!pitch) return; pitch.querySelectorAll('.token').forEach(e=>e.remove()); (p.boards[mode].tokens||[]).forEach(t=>{ const el=document.createElement('div'); el.className='token'; el.dataset.mode=mode; el.dataset.id=t.id; el.title=[t.number,t.name,t.position].filter(Boolean).join(' · '); el.style.left=(t.x||50)+'%'; el.style.top=(t.y||50)+'%'; el.style.background=t.color || (mode==='ataque'?'#0ea5e9':'#ef4444'); el.innerHTML=`<span>${esc(t.number||'?')}</span><button class="token-delete" onclick="event.stopPropagation();removeToken('${mode}','${t.id}')">×</button>`; el.addEventListener('pointerdown', startDrag); pitch.appendChild(el); }); }
+      function startDrag(ev){ const el=ev.currentTarget; drag={el,mode:el.dataset.mode,id:el.dataset.id}; el.setPointerCapture(ev.pointerId); window.addEventListener('pointermove', onDrag); window.addEventListener('pointerup', endDrag, {once:true}); }
+      function onDrag(ev){ if(!drag) return; const pitch=document.getElementById('pitch-'+drag.mode); const rect=pitch.getBoundingClientRect(); let x=((ev.clientX-rect.left)/rect.width)*100; let y=((ev.clientY-rect.top)/rect.height)*100; x=Math.max(4,Math.min(96,x)); y=Math.max(6,Math.min(94,y)); drag.el.style.left=x+'%'; drag.el.style.top=y+'%'; const p=phaseData(); const t=p?.boards?.[drag.mode]?.tokens?.find(t=>t.id===drag.id); if(t){t.x=Number(x.toFixed(2));t.y=Number(y.toFixed(2));} }
+      function endDrag(){ window.removeEventListener('pointermove', onDrag); drag=null; scheduleSave(); }
+      function renderClips(){ const p=phaseData(); const box=document.getElementById('clipList'); if(!p||!box) return; box.innerHTML=(p.clips||[]).map(c=>`<div class="clip-item"><video src="${attr(c.url)}" controls></video><div><h4>${esc(c.title||'Clip')}</h4><p><strong>${esc(c.minute||'')}</strong></p><p>${esc(c.comment||'')}</p></div></div>`).join('') || '<div class="muted">Sin clips en esta fase.</div>'; }
+      function scheduleSave(){ const st=document.getElementById('saveStatus'); if(st) st.textContent='Guardando...'; clearTimeout(saveTimer); saveTimer=setTimeout(saveAllNow,500); }
+      async function saveAllNow(){ const st=document.getElementById('saveStatus'); if(st) st.textContent='Guardando...'; try{ const res=await fetch('/rivals/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}); if(!res.ok) throw new Error('save'); if(st) st.textContent='Guardado'; setTimeout(()=>{if(st) st.textContent='Listo';},900); }catch(e){ if(st) st.textContent='Error'; alert('No se ha podido guardar.'); } }
       renderAll();
     </script>
     """
+    return template.replace("__DATA__", data_json).replace("__PHASES__", phases_json)
 
 
 @app.get("/rivals", response_class=HTMLResponse)
@@ -4691,15 +4583,21 @@ async def rivals_delete(request: Request):
 
 
 @app.post("/rivals/upload-clip")
-async def rivals_upload_clip(request: Request, rival_id: str = Form(...), phase: str = Form(...), title: str = Form(""), minute: str = Form(""), comment: str = Form(""), video: UploadFile = File(...)):
+async def rivals_upload_clip(request: Request, rival_id: str = Form(...), match_id: str = Form(""), phase: str = Form(...), title: str = Form(""), minute: str = Form(""), comment: str = Form(""), video: UploadFile = File(...)):
     if not require_user(request):
         return RedirectResponse("/login", status_code=303)
     data = load_rivals_data()
     rival = next((r for r in data.get("rivals", []) if r.get("id") == rival_id), None)
     if not rival or phase not in RIVAL_PHASES:
         return RedirectResponse("/rivals", status_code=303)
+    rival.setdefault("matches", [])
+    match = next((m for m in rival.get("matches", []) if m.get("id") == match_id), None)
+    if not match:
+        match = _empty_match_payload("Partido analizado")
+        rival["matches"].append(match)
+    match = _normalize_match_payload(match)
     ext = os.path.splitext(video.filename or "clip.mp4")[1].lower() or ".mp4"
-    filename = _safe_filename(f"{rival_id}_{phase}_{uuid.uuid4().hex}{ext}")
+    filename = _safe_filename(f"{rival_id}_{match.get('id')}_{phase}_{uuid.uuid4().hex}{ext}")
     target = os.path.join(RIVALS_UPLOADS_DIR, filename)
     content = await video.read()
     with open(target, "wb") as f:
@@ -4712,6 +4610,6 @@ async def rivals_upload_clip(request: Request, rival_id: str = Form(...), phase:
         "url": f"/static/uploads/rivals/{filename}",
         "filename": filename,
     }
-    rival.setdefault("phases", {}).setdefault(phase, _empty_phase_payload()).setdefault("clips", []).append(clip)
+    match.setdefault("phases", {}).setdefault(phase, _empty_phase_payload()).setdefault("clips", []).append(clip)
     save_rivals_data(data)
     return RedirectResponse("/rivals", status_code=303)
