@@ -4194,6 +4194,20 @@ def load_rivals_data():
         rival.setdefault("name", "Rival")
         rival.setdefault("color", "#ef4444")
         rival.setdefault("general_notes", "")
+        rival.setdefault("roster", [])
+        if not isinstance(rival.get("roster"), list):
+            rival["roster"] = []
+        normalized_roster = []
+        for player in rival.get("roster", []):
+            if not isinstance(player, dict):
+                continue
+            normalized_roster.append({
+                "id": str(player.get("id") or uuid.uuid4()),
+                "number": str(player.get("number") or "").strip(),
+                "name": str(player.get("name") or "").strip(),
+                "position": str(player.get("position") or "").strip(),
+            })
+        rival["roster"] = normalized_roster
         rival.setdefault("phases", {})
         for phase in RIVAL_PHASES:
             rival["phases"].setdefault(phase, _empty_phase_payload())
@@ -4277,7 +4291,7 @@ def render_rivals_page(request: Request) -> str:
       .clip-item h4{{margin:0 0 6px;}}
       .clip-item p{{margin:4px 0;color:#475569;white-space:pre-wrap;}}
       .save-badge{{font-size:12px;font-weight:900;padding:7px 10px;border-radius:999px;background:#e8fff4;color:#047857;}}
-      @media(max-width:1100px){{.scout-grid,.boards-grid,.clips-layout,.staff-notes{{grid-template-columns:1fr;}}.pitch{{height:300px;}}.clip-item{{grid-template-columns:1fr;}}}}
+      @media(max-width:1100px){{.scout-grid,.boards-grid,.clips-layout,.staff-notes,.roster-form{{grid-template-columns:1fr;}}.pitch{{height:300px;}}.clip-item{{grid-template-columns:1fr;}}}}
     </style>
 
     <div class="scout-wrap">
@@ -4318,18 +4332,34 @@ def render_rivals_page(request: Request) -> str:
             <p style="margin:0;">No hay equipos de ejemplo. Crea un rival en el panel izquierdo para empezar a trabajar sus fases.</p>
           </div>
 
+          <section class="roster-card" id="rosterSection">
+            <div class="scout-panel-head">
+              <h2>Plantilla rival</h2>
+              <span class="save-badge">Dorsal · Jugadora · Posición</span>
+            </div>
+            <div class="roster-body">
+              <div class="roster-form">
+                <input id="rosterNumber" placeholder="Dorsal">
+                <input id="rosterName" placeholder="Nombre jugadora">
+                <input id="rosterPosition" placeholder="Posición">
+                <button class="scout-btn scout-primary" style="background:#07122d;color:#fff;justify-content:center;" type="button" onclick="addRosterPlayer()">+ Añadir</button>
+              </div>
+              <div id="rosterList"></div>
+            </div>
+          </section>
+
           <section class="boards-grid" id="boardsGrid">
             <div class="board-card">
               <div class="board-card-head">
                 <h3>⚡ Ataque</h3>
-                <div class="board-tools"><button class="mini-btn" onclick="addToken('ataque')">+ Ficha</button><button class="mini-btn" onclick="resetBoard('ataque')">Reset</button></div>
+                <div class="board-tools"><select class="roster-select" id="rosterSelect-ataque"></select><button class="mini-btn" onclick="addRosterToken('ataque')">+ Jugadora</button><button class="mini-btn" onclick="addToken('ataque')">+ Libre</button><button class="mini-btn" onclick="resetBoard('ataque')">Reset</button></div>
               </div>
               <div class="pitch" id="pitch-ataque"><div class="mid"></div><div class="circle"></div><div class="box-l"></div><div class="box-r"></div></div>
             </div>
             <div class="board-card">
               <div class="board-card-head">
                 <h3>🛡️ Defensa</h3>
-                <div class="board-tools"><button class="mini-btn" onclick="addToken('defensa')">+ Ficha</button><button class="mini-btn" onclick="resetBoard('defensa')">Reset</button></div>
+                <div class="board-tools"><select class="roster-select" id="rosterSelect-defensa"></select><button class="mini-btn" onclick="addRosterToken('defensa')">+ Jugadora</button><button class="mini-btn" onclick="addToken('defensa')">+ Libre</button><button class="mini-btn" onclick="resetBoard('defensa')">Reset</button></div>
               </div>
               <div class="pitch" id="pitch-defensa"><div class="mid"></div><div class="circle"></div><div class="box-l"></div><div class="box-r"></div></div>
             </div>
@@ -4393,6 +4423,7 @@ def render_rivals_page(request: Request) -> str:
       function ensureShape(){{
         data.rivals = data.rivals || [];
         data.rivals.forEach(r => {{
+          r.roster = Array.isArray(r.roster) ? r.roster : [];
           r.phases = r.phases || {{}};
           phases.forEach(ph => {{
             r.phases[ph] = r.phases[ph] || {{attack_comments:'', defense_comments:'', clips:[], boards:{{}}}};
@@ -4406,7 +4437,7 @@ def render_rivals_page(request: Request) -> str:
         }});
       }}
 
-      function renderAll(){{ ensureShape(); renderRivals(); renderPhases(); const has=!!currentRival(); document.getElementById('emptyRivalsBox').style.display=has?'none':'block'; document.getElementById('boardsGrid').style.display=has?'grid':'none'; document.getElementById('staffNotesSection').style.display=has?'grid':'none'; document.getElementById('clipsSection').style.display=has?'block':'none'; if(has){{renderBoards(); renderNotes(); renderClips();}} }}
+      function renderAll(){{ ensureShape(); renderRivals(); renderPhases(); const has=!!currentRival(); document.getElementById('emptyRivalsBox').style.display=has?'none':'block'; document.getElementById('rosterSection').style.display=has?'block':'none'; document.getElementById('boardsGrid').style.display=has?'grid':'none'; document.getElementById('staffNotesSection').style.display=has?'grid':'none'; document.getElementById('clipsSection').style.display=has?'block':'none'; if(has){{renderRoster(); renderBoards(); renderNotes(); renderClips();}} }}
       function renderRivals(){{
         if(!currentRivalId && data.rivals.length) currentRivalId=data.rivals[0].id;
         const box=document.getElementById('rivalList'); box.innerHTML='';
@@ -4430,6 +4461,63 @@ def render_rivals_page(request: Request) -> str:
           box.appendChild(b);
         }});
       }}
+      function renderRoster(){
+        const r=currentRival(); if(!r) return;
+        r.roster = Array.isArray(r.roster) ? r.roster : [];
+        const box=document.getElementById('rosterList');
+        if(!r.roster.length){
+          box.innerHTML='<div class="roster-empty">Aún no hay plantilla cargada para este rival. Añade dorsal, jugadora y posición.</div>';
+        } else {
+          const rows=r.roster.map(player=>`
+            <tr>
+              <td><strong>${escapeHtml(player.number||'')}</strong></td>
+              <td>${escapeHtml(player.name||'')}</td>
+              <td>${escapeHtml(player.position||'')}</td>
+              <td style="text-align:right;"><button class="roster-delete" type="button" onclick="removeRosterPlayer('${escapeAttr(player.id)}')">Eliminar</button></td>
+            </tr>`).join('');
+          box.innerHTML=`<table class="roster-table"><thead><tr><th>Dorsal</th><th>Jugadora</th><th>Posición</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+        }
+        renderRosterSelects();
+      }
+      function renderRosterSelects(){
+        const r=currentRival(); if(!r) return;
+        ['ataque','defensa'].forEach(mode=>{
+          const sel=document.getElementById('rosterSelect-'+mode); if(!sel) return;
+          if(!r.roster.length){
+            sel.innerHTML='<option value="">Sin plantilla</option>';
+            return;
+          }
+          sel.innerHTML='<option value="">Elegir jugadora</option>' + r.roster.map(p=>`<option value="${escapeAttr(p.id)}">${escapeHtml((p.number? p.number+' · ' : '') + (p.name||'Jugadora'))}</option>`).join('');
+        });
+      }
+      function addRosterPlayer(){
+        const r=currentRival(); if(!r) return;
+        const number=document.getElementById('rosterNumber').value.trim();
+        const name=document.getElementById('rosterName').value.trim();
+        const position=document.getElementById('rosterPosition').value.trim();
+        if(!number && !name) return;
+        r.roster = Array.isArray(r.roster) ? r.roster : [];
+        r.roster.push({id:uid(), number, name, position});
+        document.getElementById('rosterNumber').value='';
+        document.getElementById('rosterName').value='';
+        document.getElementById('rosterPosition').value='';
+        renderRoster(); scheduleSave();
+      }
+      function removeRosterPlayer(playerId){
+        const r=currentRival(); if(!r) return;
+        if(!confirm('¿Eliminar esta jugadora de la plantilla rival?')) return;
+        r.roster = (r.roster||[]).filter(p=>p.id!==playerId);
+        renderRoster(); scheduleSave();
+      }
+      function addRosterToken(mode){
+        const r=currentRival(); const pData=phaseData(); if(!r || !pData) return;
+        const sel=document.getElementById('rosterSelect-'+mode); if(!sel || !sel.value) return;
+        const player=(r.roster||[]).find(p=>p.id===sel.value); if(!player) return;
+        const tokens=pData.boards[mode].tokens;
+        tokens.push({id:uid(), number:player.number||'', name:player.name||'', position:player.position||'', x:50, y:50, color: mode==='ataque'?'#0ea5e9':'#ef4444'});
+        sel.value='';
+        renderBoard(mode); scheduleSave();
+      }
       function renderBoards(){{ ['ataque','defensa'].forEach(renderBoard); }}
       function renderBoard(mode){{
         const pData = phaseData(); if(!pData) return;
@@ -4439,6 +4527,7 @@ def render_rivals_page(request: Request) -> str:
         board.tokens.forEach(t => {{
           const el=document.createElement('div'); el.className='token'; el.dataset.mode=mode; el.dataset.id=t.id;
           el.style.left=(t.x||50)+'%'; el.style.top=(t.y||50)+'%'; el.style.background=t.color || (mode==='ataque'?'#0ea5e9':'#ef4444');
+          if(t.name) el.title = (t.number ? t.number + ' · ' : '') + t.name + (t.position ? ' · ' + t.position : '');
           const input=document.createElement('input'); input.value=t.number || ''; input.maxLength=3;
           input.oninput=()=>{{ t.number=input.value; scheduleSave(); }};
           input.onclick=(ev)=>ev.stopPropagation(); input.onpointerdown=(ev)=>ev.stopPropagation();
@@ -4474,7 +4563,7 @@ def render_rivals_page(request: Request) -> str:
         const color=document.getElementById('newRivalColor').value || '#ef4444';
         const phasesObj={{}};
         phases.forEach(ph=> phasesObj[ph]={{attack_comments:'',defense_comments:'',clips:[],boards:{{ataque:{{tokens:[]}},defensa:{{tokens:[]}}}}}});
-        data.rivals.push({{id:uid(), name, color, general_notes:'', phases:phasesObj}});
+        data.rivals.push({{id:uid(), name, color, general_notes:'', roster:[], phases:phasesObj}});
         currentRivalId=data.rivals[data.rivals.length-1].id;
         document.getElementById('newRivalName').value='';
         scheduleSave(); renderAll();
